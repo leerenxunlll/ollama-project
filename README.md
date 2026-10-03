@@ -39,6 +39,8 @@
 - Git: 2.34.1
 - Docker: 29.8.1
 - Editor: Visual Studio Code
+## Projiexct install
+- ollama 0.35.1(执行ollama-install.sh脚本会检查gpu,自动完成cuda依赖安装，目前官方已经将AMD Raden 780M列入支持，但我的系统（ubuntu22.04）不在支持范围了内，故不启动ROMc(已安装，不启用))
 
 ## Project Structure
 
