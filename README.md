@@ -62,7 +62,56 @@ ai-interview-lab/
 - 遇到问题时记录原因、排查过程和解决方案
 - 优先实现最小可工作的版本，再逐步优化
 
+## Project copy
+
 ## AI Usage
 
 本项目会使用 ChatGPT 和 Codex 辅助学习、设计、调试与代码 Review。
 AI 生成的建议和代码不会直接视为正确结果，所有重要修改都会经过人工理解、测试和 Git Diff 检查。
+
+## Local LLM Baseline
+
+当前已完成 Ollama 本地模型服务与 Qwen3 4B 的基础部署验证。
+
+### Environment
+
+| Item | Configuration |
+| --- | --- |
+| OS | Ubuntu 22.04 |
+| CPU | AMD Ryzen 7 8745HS, 8 cores / 16 threads |
+| GPU | AMD Radeon 780M |
+| RAM | 35 GiB |
+| Ollama | 0.35.1 |
+| Model | qwen3:4b |
+| Model size | 2.5 GB |
+| Runtime processor | 100% CPU |
+
+### Single-run Performance
+
+测试接口：
+
+`POST http://localhost:11434/api/chat`
+
+测试条件：
+
+- `stream: false`
+- `think: false`
+- Processor: CPU
+- Prompt: `请用不超过50个汉字解释Git和GitHub的区别。`
+
+| Metric | Result |
+| --- | ---: |
+| Prompt tokens | 23 |
+| Generated tokens | 2726 |
+| Prompt evaluation time | 0.0598 s |
+| Generation time | 206.022 s |
+| Total request time | 206.106 s |
+| Generation speed | ~13.23 tokens/s |
+
+> 本结果为单次运行结果，仅用于建立当前设备的初始 CPU 推理 baseline，不代表稳定平均性能。
+
+### Observation
+
+虽然请求设置了 `think: false`，本次响应仍产生了较长的 reasoning 内容，导致仅有较短最终答案的情况下生成了 2726 tokens。
+
+后续将进一步验证 thinking 模式行为，并通过多次重复测试比较模型大小、推理后端和运行参数对性能的影响。
