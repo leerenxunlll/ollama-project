@@ -7,3 +7,4 @@
 - [x] Phase 5：删除功能
 - [x] Phase 6：标题与时间戳
 - [x] Phase 7：完整验证
+- [x] Python 依赖与使用说明
