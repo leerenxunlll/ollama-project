@@ -84,9 +84,10 @@ AI 生成的建议和代码不会直接视为正确结果，所有重要修改�
 | Ollama | 0.35.1 |
 | Model | qwen3:4b |
 | Model size | 2.5 GB |
-| Runtime processor | 100% CPU |
+| Runtime processor | 100% GPU (Vulkan) |
+| Vulkan device | RADV GFX1103_R1 (AMD integrated GPU) |
 
-### Single-run Performance
+### CPU / Vulkan GPU Performance Comparison
 
 测试接口：
 
@@ -96,22 +97,20 @@ AI 生成的建议和代码不会直接视为正确结果，所有重要修改�
 
 - `stream: false`
 - `think: false`
-- Processor: CPU
+- CPU: existing single-run baseline
+- Vulkan GPU: three runs; `ollama ps` reported `100% GPU`
 - Prompt: `请用不超过50个汉字解释Git和GitHub的区别。`
 
-| Metric | Result |
-| --- | ---: |
-| Prompt tokens | 23 |
-| Generated tokens | 2726 |
-| Prompt evaluation time | 0.0598 s |
-| Generation time | 206.022 s |
-| Total request time | 206.106 s |
-| Generation speed | ~13.23 tokens/s |
+| Processor / Run | Prompt tokens | Generated tokens | Prompt evaluation time | Generation time | Total request time | Generation speed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| CPU (original single run) | 23 | 2726 | 0.0598 s | 206.022 s | 206.106 s | ~13.23 tokens/s |
+| Vulkan GPU (Run 1) | 23 | 2614 | 0.1890 s | 111.838 s | 113.459 s | 23.37 tokens/s |
+| Vulkan GPU (Run 2) | 23 | 3112 | 0.0461 s | 134.628 s | 136.533 s | 23.12 tokens/s |
+| Vulkan GPU (Run 3) | 23 | 2059 | 0.0479 s | 86.770 s | 88.935 s | 23.73 tokens/s |
+| Vulkan GPU (average of 3) | 23 | 2595 | 0.0943 s | 111.079 s | 112.976 s | ~23.41 tokens/s |
 
-> 本结果为单次运行结果，仅用于建立当前设备的初始 CPU 推理 baseline，不代表稳定平均性能。
+> CPU 结果保留原始单次记录；GPU 结果为三次运行及其平均值，GPU 平均生成速度按三次单次速度的算术平均计算。GPU 速度约为 CPU baseline 的 1.77 倍，但由于 CPU 只有一次样本且生成 token 数存在变化，此对比仅供参考。
 
 ### Observation
 
-虽然请求设置了 `think: false`，本次响应仍产生了较长的 reasoning 内容，导致仅有较短最终答案的情况下生成了 2726 tokens。
-
-后续将进一步验证 thinking 模式行为，并通过多次重复测试比较模型大小、推理后端和运行参数对性能的影响。
+虽然请求设置了 `think: false`，CPU 单次结果仍生成了 2726 tokens；GPU 三次结果生成了 2059 至 3112 tokens。生成长度存在变化，因此吞吐速度适合参考，不代表严格的多轮 CPU/GPU 对照测试。
