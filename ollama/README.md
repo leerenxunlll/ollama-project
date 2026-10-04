@@ -24,10 +24,9 @@
 
 - [x] 开发环境检查
 - [x] Git 仓库初始化
-- [ ] 本地大语言模型部署
-- [ ] Python 调用本地模型
-- [ ] Agent
-- [ ] 应用接入
+- [x] 本地大语言模型部署
+- [x] Python 调用本地模型
+- [x] 优化模型对话方案
 
 ## Development Environment
 
@@ -46,11 +45,16 @@
 
 ```text
 ai-interview-lab/
-├── README.md
 ├── .gitignore
+├── TODO.md
 ├── docs/
 │   └── dev-log.md
-└── src/
+└── ollama/
+    ├── README.md
+    ├── requirements.txt
+    ├── data/
+    ├── src/
+    └── tests/
 ```
 
 ## Development Principles
@@ -119,9 +123,10 @@ AI 生成的建议和代码不会直接视为正确结果，所有重要修改�
 ## 使用说明
 
 项目使用 Python 3.10 及以上版本、Ollama 本地服务和 `qwen3:4b` 模型。先确认 Ollama
-服务已启动；首次使用时下载模型，然后在项目根目录安装 Python 依赖并启动聊天程序：
+服务已启动。从仓库根目录执行以下命令；首次使用时会下载模型：
 
 ```bash
+cd ollama
 ollama pull qwen3:4b
 python3 -m pip install -r requirements.txt
 python3 src/chat_client.py
@@ -129,13 +134,13 @@ python3 src/chat_client.py
 
 执行`pip install -r requirements.txt`安装依赖
 SQLite、日期时间、
-路径和 UUID 功能使用 Python 标准库。聊天历史会自动保存到项目根目录的 `data/chat.db`，
+路径和 UUID 功能使用 Python 标准库。聊天历史会自动保存到 `ollama/data/chat.db`，
 首次启动时自动创建数据库和所需表。
 
 ### 多轮对话
 
 启动后可连续对话，输入 `exit` 退出。成功完成的问答
-会保存在 `data/chat.db`；新会话标题取首条成功提问，最长 30 个字符。已有数据库迁移时
+会保存在 `ollama/data/chat.db`；新会话标题取首条成功提问，最长 30 个字符。已有数据库迁移时
 保留旧会话标题。数据库时间以 UTC 保存，列表显示本地时间。每次启动后的首条成功问答会
 开始新的会话，`/new` 会立即创建空会话。历史可通过 `/list` 和 `/open <number>` 查看并恢复。
 

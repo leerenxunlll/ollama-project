@@ -23,6 +23,9 @@ venv/
 /data/*.db
 /data/*.db-shm
 /data/*.db-wal
+/ollama/data/*.db
+/ollama/data/*.db-shm
+/ollama/data/*.db-wal
 
 # Local agent instructions
 AGENTS.md
