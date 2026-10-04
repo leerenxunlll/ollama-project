@@ -18,3 +18,12 @@ venv/
 
 # OS
 .DS_Store
+
+# Local chat data
+/data/*.db
+/data/*.db-shm
+/data/*.db-wal
+
+# Local agent instructions
+AGENTS.md
+CLAUDE.md
