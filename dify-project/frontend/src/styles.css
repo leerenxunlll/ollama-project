@@ -518,6 +518,56 @@ h1 em {
   font-weight: 500;
 }
 
+.game-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding-block: 14px;
+}
+
+.game-action-row .section-caption {
+  margin: 0;
+}
+
+.investigation-controls {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.investigation-controls > .eyebrow,
+.investigation-controls > .section-caption {
+  margin-block: 0 10px;
+}
+
+.investigation-action {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.investigation-action .field-label {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.search-result {
+  margin-top: 14px;
+  border: 1px solid rgb(215 178 125 / 24%);
+  background: rgb(215 178 125 / 5%);
+  color: #e0d7c9;
+  padding: 13px 14px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.search-result p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
 .game-character-list {
   margin: 0;
   padding: 0;
@@ -698,6 +748,11 @@ h1 em {
 
   .dev-grid {
     grid-template-columns: 1fr;
+  }
+
+  .game-action-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .entrance-card {

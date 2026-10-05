@@ -9,16 +9,31 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.db.session import get_db
 from app.game.character_selection import select_human_character
-from app.models import Character, GameCharacter, GameSession, Script
+from app.game.state_machine import GameRuleError
+from app.models import Character, GameCharacter, GameSession, Message, Script
 from app.schemas.context import CharacterContext
 from app.schemas.game import (
     CharacterSelection,
     GameCreate,
     GameRead,
+    GameStateRead,
+    InvestigationLocationsRead,
+    InvestigationResultRead,
+    InvestigationSearch,
+    MessageRead,
     MyCharacterRead,
+    PlayerMessageCreate,
     SelectableCharacterRead,
 )
 from app.services.character_context import build_character_context
+from app.services.gameplay import (
+    advance_game_phase,
+    create_player_message,
+    get_game_state,
+    get_investigation_locations,
+    search_location,
+    start_game,
+)
 
 router = APIRouter()
 
@@ -67,7 +82,7 @@ def create_game(
     game = GameSession(
         script_id=script.id,
         status="waiting_for_character_selection",
-        current_phase="introduction",
+        current_phase="intro",
         random_seed=secrets.randbits(32),
     )
     db.add(game)
@@ -110,6 +125,96 @@ def get_game(game_id: int, db: Session = Depends(get_db)) -> GameSession:
     if game is None:
         raise HTTPException(status_code=404, detail="Game not found")
     return game
+
+
+@router.get("/games/{game_id}/state", response_model=GameStateRead)
+def read_game_state(game_id: int, db: Session = Depends(get_db)) -> GameStateRead:
+    """Read safe lifecycle and narrative phase information."""
+    try:
+        return get_game_state(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post("/games/{game_id}/start", response_model=GameStateRead)
+def begin_game(game_id: int, db: Session = Depends(get_db)) -> GameStateRead:
+    """Start a ready game after its four controller assignments are validated."""
+    try:
+        return start_game(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/games/{game_id}/advance-phase", response_model=GameStateRead)
+def advance_phase(game_id: int, db: Session = Depends(get_db)) -> GameStateRead:
+    """Advance exactly once along the Game Engine's fixed phase sequence."""
+    try:
+        return advance_game_phase(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get(
+    "/games/{game_id}/investigation/locations",
+    response_model=InvestigationLocationsRead,
+)
+def list_investigation_locations(
+    game_id: int,
+    db: Session = Depends(get_db),
+) -> InvestigationLocationsRead:
+    """List locations only while the active game is in an investigation phase."""
+    try:
+        return get_investigation_locations(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/games/{game_id}/investigation/search",
+    response_model=InvestigationResultRead,
+)
+def search_investigation_location(
+    game_id: int,
+    payload: InvestigationSearch,
+    db: Session = Depends(get_db),
+) -> InvestigationResultRead:
+    """Apply one deterministic clue search for a character in this game."""
+    try:
+        return search_location(
+            db,
+            game_id,
+            payload.game_character_id,
+            payload.location,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/games/{game_id}/messages",
+    response_model=MessageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def write_player_message(
+    game_id: int,
+    payload: PlayerMessageCreate,
+    db: Session = Depends(get_db),
+) -> Message:
+    """Write public/private participant messages; system events stay internal."""
+    try:
+        return create_player_message(db, game_id, payload)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get(

@@ -12,6 +12,19 @@ def seed_development_data(db: Session) -> Script:
     """Create the fixed development script once and return it on later runs."""
     existing = db.scalar(select(Script).where(Script.title == DEVELOPMENT_SCRIPT_TITLE))
     if existing is not None:
+        phase3_acts = {
+            "潮湿的登记页": "act_1",
+            "断裂的铜扣": "act_1",
+            "未署名信封": "act_2",
+        }
+        changed = False
+        for clue in existing.clues:
+            act = phase3_acts.get(clue.name)
+            if act is not None and clue.act != act:
+                clue.act = act
+                changed = True
+        if changed:
+            db.commit()
         return existing
 
     script = Script(
@@ -70,7 +83,7 @@ def seed_development_data(db: Session) -> Script:
         Clue(
             name="潮湿的登记页",
             description="一页被海水浸湿的仓库出入登记。",
-            act="opening",
+            act="act_1",
             location="旧仓库办公室",
             is_core=True,
             importance=3,
@@ -78,7 +91,7 @@ def seed_development_data(db: Session) -> Script:
         Clue(
             name="断裂的铜扣",
             description="在侧门附近发现的一枚旧式铜扣。",
-            act="investigation",
+            act="act_1",
             location="仓库侧门",
             is_core=False,
             importance=2,
@@ -86,7 +99,7 @@ def seed_development_data(db: Session) -> Script:
         Clue(
             name="未署名信封",
             description="一只没有寄件人信息的空信封。",
-            act="investigation",
+            act="act_2",
             location="渡船候船室",
             is_core=True,
             importance=2,

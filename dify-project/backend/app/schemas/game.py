@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class GameCreate(BaseModel):
@@ -44,6 +44,92 @@ class GameRead(BaseModel):
     started_at: datetime | None
     ended_at: datetime | None
     game_characters: list[GameCharacterRead]
+
+
+class GameStateRead(BaseModel):
+    """Safe lifecycle and narrative state for the development interface."""
+
+    game_id: int
+    status: str
+    current_phase: str
+    started_at: datetime | None
+    ended_at: datetime | None
+    next_phase: str | None
+    can_investigate: bool
+
+
+class InvestigationLocationsRead(BaseModel):
+    """Locations with undiscovered clues for the current investigation act."""
+
+    game_id: int
+    current_phase: str
+    locations: list[str]
+
+
+class InvestigationSearch(BaseModel):
+    """Search one location on behalf of a runtime character."""
+
+    game_character_id: int
+    location: str = Field(min_length=1)
+
+
+class InvestigationClueRead(BaseModel):
+    """A clue explicitly granted by one search action."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str
+    act: str
+    location: str
+    is_core: bool
+    importance: int
+
+
+class InvestigationResultRead(BaseModel):
+    """Result of a deterministic search; an empty result is still successful."""
+
+    game_id: int
+    game_character_id: int
+    location: str
+    found: bool
+    clue: InvestigationClueRead | None
+
+
+class PlayerMessageCreate(BaseModel):
+    """A public or private message submitted by a game character."""
+
+    sender_game_character_id: int
+    channel_type: str = Field(pattern="^(public|private)$")
+    receiver_game_character_id: int | None = None
+    content: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_receiver(self) -> "PlayerMessageCreate":
+        """Match receiver presence to the selected conversation channel."""
+        if (
+            self.channel_type == "public"
+            and self.receiver_game_character_id is not None
+        ):
+            raise ValueError("Public messages cannot have a receiver")
+        if self.channel_type == "private" and self.receiver_game_character_id is None:
+            raise ValueError("Private messages require a receiver")
+        return self
+
+
+class MessageRead(BaseModel):
+    """Persisted player message; system messages are not accepted by this API."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    game_session_id: int
+    sender_game_character_id: int
+    channel_type: str
+    receiver_game_character_id: int | None
+    content: str
+    created_at: datetime
 
 
 class SelectableCharacterRead(BaseModel):

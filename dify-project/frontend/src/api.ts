@@ -21,15 +21,67 @@ export interface GameCharacterSummary {
   }
 }
 
+export type GameStatus =
+  | 'waiting_for_character_selection'
+  | 'ready'
+  | 'in_progress'
+  | 'finished'
+  | 'completed'
+  | 'abandoned'
+
+export type GamePhase =
+  | 'intro'
+  | 'act_1'
+  | 'investigation_1'
+  | 'discussion_1'
+  | 'act_2'
+  | 'investigation_2'
+  | 'discussion_2'
+  | 'final_discussion'
+  | 'vote'
+  | 'ending'
+
 export interface GameResponse {
   id: number
   script_id: number
-  status: string
-  current_phase: string
+  status: GameStatus
+  current_phase: GamePhase
   created_at: string
   started_at: string | null
   ended_at: string | null
   game_characters: GameCharacterSummary[]
+}
+
+export interface GameStateResponse {
+  game_id: number
+  status: GameStatus
+  current_phase: GamePhase
+  started_at: string | null
+  ended_at: string | null
+  next_phase: GamePhase | null
+  can_investigate: boolean
+}
+
+export interface InvestigationLocationsResponse {
+  game_id: number
+  current_phase: GamePhase
+  locations: string[]
+}
+
+export interface InvestigationSearchResponse {
+  game_id: number
+  game_character_id: number
+  location: string
+  found: boolean
+  clue: {
+    id: number
+    name: string
+    description: string
+    act: string
+    location: string
+    is_core: boolean
+    importance: number
+  } | null
 }
 
 export interface SelectableCharacter {
@@ -127,7 +179,16 @@ async function requestJson<T>(
     const response = await fetch(`${apiBaseUrl}${path}`, init)
     responseStatus = response.status
     if (!response.ok) {
-      throw new Error(`后端返回 HTTP ${response.status}`)
+      let message = `后端返回 HTTP ${response.status}`
+      try {
+        const errorPayload = (await response.json()) as { detail?: unknown }
+        if (typeof errorPayload.detail === 'string') {
+          message = errorPayload.detail
+        }
+      } catch {
+        // Some development server errors do not return JSON.
+      }
+      throw new Error(message)
     }
 
     const payload = (await response.json()) as T
@@ -171,6 +232,39 @@ export function createGame(scriptId: number): Promise<GameResponse> {
 
 export function getGame(gameId: number): Promise<GameResponse> {
   return requestJson(`/api/games/${gameId}`)
+}
+
+export function getGameState(gameId: number): Promise<GameStateResponse> {
+  return requestJson(`/api/games/${gameId}/state`)
+}
+
+export function startGame(gameId: number): Promise<GameStateResponse> {
+  return requestJson(`/api/games/${gameId}/start`, { method: 'POST' })
+}
+
+export function advanceGamePhase(gameId: number): Promise<GameStateResponse> {
+  return requestJson(`/api/games/${gameId}/advance-phase`, { method: 'POST' })
+}
+
+export function getInvestigationLocations(
+  gameId: number,
+): Promise<InvestigationLocationsResponse> {
+  return requestJson(`/api/games/${gameId}/investigation/locations`)
+}
+
+export function searchInvestigationLocation(
+  gameId: number,
+  gameCharacterId: number,
+  location: string,
+): Promise<InvestigationSearchResponse> {
+  return requestJson(`/api/games/${gameId}/investigation/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      game_character_id: gameCharacterId,
+      location,
+    }),
+  })
 }
 
 export function getSelectableCharacters(

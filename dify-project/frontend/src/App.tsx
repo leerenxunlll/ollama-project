@@ -68,15 +68,18 @@ function App() {
           <span>AI MURDER MYSTERY</span>
         </a>
         <span className="phase-label">
-          PHASE 02 <i /> INFORMATION BOUNDARY
+          PHASE 03 <i /> GAME ENGINE
         </span>
       </header>
 
       <section className="intro" id="home">
         <div className="intro-copy">
-          <p className="eyebrow"><span /> 一场尚未落幕的悬疑</p>
+          <p className="eyebrow">
+            <span /> 一场尚未落幕的悬疑
+          </p>
           <h1>
-            真相，<br />
+            真相，
+            <br />
             <em>藏在每个人心里。</em>
           </h1>
           <p className="description">
@@ -84,7 +87,10 @@ function App() {
           </p>
         </div>
 
-        <aside className={`connection-card state-${connectionState}`} aria-live="polite">
+        <aside
+          className={`connection-card state-${connectionState}`}
+          aria-live="polite"
+        >
           <span className="connection-icon" aria-hidden="true">
             {connectionCopy.icon}
           </span>
@@ -121,7 +127,9 @@ function App() {
 
       <footer className="footer">
         <span>一个关于秘密、选择与真相的故事</span>
-        <span className="footer-mark">AMM <i /> 2026</span>
+        <span className="footer-mark">
+          AMM <i /> 2026
+        </span>
       </footer>
     </main>
   )

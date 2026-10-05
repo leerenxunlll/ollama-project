@@ -27,7 +27,7 @@ class GameSession(Base):
         CheckConstraint(
             "status IN ("
             "'waiting_for_character_selection', 'ready', 'in_progress', "
-            "'completed', 'abandoned')",
+            "'finished', 'completed', 'abandoned')",
             name="ck_game_sessions_status",
         ),
     )
@@ -38,7 +38,7 @@ class GameSession(Base):
         String(50), default="waiting_for_character_selection", nullable=False
     )
     current_phase: Mapped[str] = mapped_column(
-        String(80), default="introduction", nullable=False
+        String(80), default="intro", nullable=False
     )
     random_seed: Mapped[int] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(

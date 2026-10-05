@@ -2,15 +2,22 @@ import { useEffect, useState } from 'react'
 
 import {
   createGame,
+  advanceGamePhase,
   getCharacterContext,
   getGame,
+  getGameState,
   getGames,
+  getInvestigationLocations,
   getMyCharacter,
   getScripts,
   getSelectableCharacters,
   selectCharacter,
+  searchInvestigationLocation,
+  startGame,
   type CharacterContext,
   type GameResponse,
+  type GameStateResponse,
+  type InvestigationSearchResponse,
   type MyCharacterCard,
   type ScriptSummary,
   type SelectableCharacter,
@@ -26,6 +33,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState('')
   const [game, setGame] = useState<GameResponse | null>(null)
+  const [gameState, setGameState] = useState<GameStateResponse | null>(null)
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null)
   const [selectableCharacters, setSelectableCharacters] = useState<
     SelectableCharacter[]
@@ -41,6 +49,11 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   )
   const [context, setContext] = useState<CharacterContext | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState('')
+  const [locations, setLocations] = useState<string[]>([])
+  const [selectedLocation, setSelectedLocation] = useState('')
+  const [searchResult, setSearchResult] =
+    useState<InvestigationSearchResponse | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -69,22 +82,41 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   async function loadGameSession(gameId: number) {
     setGameError('')
     setContext(null)
+    setSearchResult(null)
+    setLocations([])
+    setSelectedLocation('')
 
     try {
-      const loadedGame = await getGame(gameId)
+      const [loadedGame, loadedState] = await Promise.all([
+        getGame(gameId),
+        getGameState(gameId),
+      ])
       setGame(loadedGame)
+      setGameState(loadedState)
       setSelectedGameId(gameId)
-      setContextCharacterId(loadedGame.game_characters[0]?.id ?? null)
 
       if (loadedGame.status === 'waiting_for_character_selection') {
         setMyCharacter(null)
+        setContextCharacterId(loadedGame.game_characters[0]?.id ?? null)
         setSelectableCharacters(await getSelectableCharacters(gameId))
       } else {
         setSelectableCharacters([])
+        let playerCharacter: MyCharacterCard | null = null
         try {
-          setMyCharacter(await getMyCharacter(gameId))
+          playerCharacter = await getMyCharacter(gameId)
         } catch {
-          setMyCharacter(null)
+          playerCharacter = null
+        }
+        setMyCharacter(playerCharacter)
+        setContextCharacterId(
+          playerCharacter?.game_character_id ??
+            loadedGame.game_characters[0]?.id ??
+            null,
+        )
+        if (loadedState.can_investigate) {
+          const available = await getInvestigationLocations(gameId)
+          setLocations(available.locations)
+          setSelectedLocation(available.locations[0] ?? '')
         }
       }
     } catch (error) {
@@ -137,6 +169,72 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     }
   }
 
+  async function handleStartGame() {
+    if (selectedGameId === null) return
+
+    setActionLoading('start')
+    setGameError('')
+    try {
+      await startGame(selectedGameId)
+      await loadGameSession(selectedGameId)
+      setGames(await getGames())
+    } catch (error) {
+      setGameError(error instanceof Error ? error.message : '开始游戏失败')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  async function handleAdvancePhase() {
+    if (selectedGameId === null) return
+
+    setActionLoading('advance')
+    setGameError('')
+    try {
+      await advanceGamePhase(selectedGameId)
+      await loadGameSession(selectedGameId)
+      setGames(await getGames())
+    } catch (error) {
+      setGameError(error instanceof Error ? error.message : '推进阶段失败')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  async function handleSearch() {
+    if (
+      selectedGameId === null ||
+      myCharacter === null ||
+      selectedLocation === ''
+    ) {
+      return
+    }
+
+    setActionLoading('search')
+    setGameError('')
+    setContext(null)
+    try {
+      const result = await searchInvestigationLocation(
+        selectedGameId,
+        myCharacter.game_character_id,
+        selectedLocation,
+      )
+      setSearchResult(result)
+      if (contextCharacterId === myCharacter.game_character_id) {
+        setContext(
+          await getCharacterContext(
+            selectedGameId,
+            myCharacter.game_character_id,
+          ),
+        )
+      }
+    } catch (error) {
+      setGameError(error instanceof Error ? error.message : '搜证失败')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   return (
     <main className="page-shell dev-shell">
       <header className="topbar">
@@ -155,11 +253,11 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       <section className="dev-intro">
         <p className="eyebrow">
-          <span /> PHASE 02 / DEVELOPMENT DEBUG
+          <span /> PHASE 03 / DEVELOPMENT DEBUG
         </p>
-        <h1>角色与信息边界验证</h1>
+        <h1>游戏规则与搜证验证</h1>
         <p className="description">
-          选择测试游戏和公开角色卡，验证真人分配、私人角色卡与授权上下文。
+          手动开始游戏、推进剧情阶段并搜证，验证确定性规则与角色线索边界。
         </p>
       </section>
 
@@ -250,11 +348,19 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           {game && (
             <div className="session-meta">
               <span>
-                阶段 <strong>{game.current_phase}</strong>
+                阶段{' '}
+                <strong>
+                  {gameState?.current_phase ?? game.current_phase}
+                </strong>
               </span>
               <span>
                 状态 <strong>{game.status}</strong>
               </span>
+              {gameState && (
+                <span>
+                  下一阶段 <strong>{gameState.next_phase ?? '无'}</strong>
+                </span>
+              )}
             </div>
           )}
           {!game && !gameError && (
@@ -317,6 +423,108 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
                 </li>
               ))}
             </ol>
+          )}
+
+          {game?.status === 'ready' && (
+            <div className="game-action-row">
+              <p className="section-caption">
+                角色分配已锁定，可以开始这一局。
+              </p>
+              <button
+                className="action-button"
+                type="button"
+                disabled={actionLoading !== ''}
+                onClick={handleStartGame}
+              >
+                {actionLoading === 'start'
+                  ? '开始中…'
+                  : 'Start Game · 开始游戏'}
+              </button>
+            </div>
+          )}
+
+          {gameState?.status === 'in_progress' && (
+            <div className="game-action-row">
+              <p className="section-caption">
+                当前阶段：{gameState.current_phase}
+                {gameState.next_phase
+                  ? ` · 下一阶段：${gameState.next_phase}`
+                  : ' · 已到最后阶段'}
+              </p>
+              {gameState.next_phase && (
+                <button
+                  className="action-button"
+                  type="button"
+                  disabled={actionLoading !== ''}
+                  onClick={handleAdvancePhase}
+                >
+                  {actionLoading === 'advance'
+                    ? '推进中…'
+                    : 'Advance Phase · 推进阶段'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {gameState?.can_investigate && (
+            <div className="investigation-controls">
+              <p className="eyebrow">DETERMINISTIC INVESTIGATION</p>
+              <p className="section-caption">
+                搜证角色：{myCharacter?.name ?? '尚未选择真人角色'}
+              </p>
+              {locations.length > 0 ? (
+                <div className="investigation-action">
+                  <label
+                    className="field-label"
+                    htmlFor="investigation-location"
+                  >
+                    选择地点
+                  </label>
+                  <select
+                    className="dev-select"
+                    id="investigation-location"
+                    value={selectedLocation}
+                    onChange={(event) =>
+                      setSelectedLocation(event.target.value)
+                    }
+                  >
+                    {locations.map((location) => (
+                      <option key={location} value={location}>
+                        {location}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="action-button"
+                    type="button"
+                    disabled={
+                      actionLoading !== '' ||
+                      myCharacter === null ||
+                      selectedLocation === ''
+                    }
+                    onClick={handleSearch}
+                  >
+                    {actionLoading === 'search'
+                      ? '搜证中…'
+                      : 'Search · 搜索地点'}
+                  </button>
+                </div>
+              ) : (
+                <p className="dev-message">当前调查幕没有预设线索地点。</p>
+              )}
+              {searchResult && (
+                <div className="search-result" role="status">
+                  {searchResult.found && searchResult.clue ? (
+                    <>
+                      <strong>发现线索：{searchResult.clue.name}</strong>
+                      <p>{searchResult.clue.description}</p>
+                    </>
+                  ) : (
+                    <p>这个地点没有新的线索。</p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </section>
@@ -412,7 +620,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       <footer className="footer">
         <span>仅用于验证角色分配与信息边界</span>
         <span className="footer-mark">
-          PHASE 02 <i /> DEVELOPMENT DEBUG
+          PHASE 03 <i /> DEVELOPMENT DEBUG
         </span>
       </footer>
     </main>

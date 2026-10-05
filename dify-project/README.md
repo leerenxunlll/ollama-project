@@ -1,17 +1,18 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前 **Phase 2：角色选择、信息访问控制与 Agent Context Builder** 已完成。当前没有 Dify 或 LLM 调用。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前 **Phase 3：Game Engine、游戏状态机与确定性搜证规则** 已完成。当前没有 Dify 或 LLM 调用。
 
-## 当前 Phase 2
+## 当前 Phase 3
 
-- 保留 Phase 1 的剧本模板、游戏运行实例、消息与四角色开发 seed。
-- 新游戏先处于 `waiting_for_character_selection`；真人选择后锁定为 1 个 `human` 与 3 个 `ai`，游戏状态进入 `ready`。
-- 角色选择 API 与真人角色卡 API 使用公开/私有字段白名单。
-- Context Builder 位于后端 `services/`，按当前角色过滤其他角色资料、消息和已知线索。
-- 前端 Development / Debug 页面可选择 GameSession、分配真人角色并查看自己的角色卡与开发 Context。
-- `DirectorContext` 目前只有 Pydantic schema；没有 Director、LLM 或 Dify 调用。
+- 在角色选择完成后由 Game Engine 校验并开始游戏，按固定顺序手动推进剧情阶段。
+- 仅在 `investigation_1` / `investigation_2` 阶段允许搜证，分别匹配 `act_1` / `act_2` 线索。
+- 搜证按 importance 降序、Clue ID 升序稳定选择；线索只授予实际搜证的 GameCharacter。
+- Context Builder 只读 `GameCharacterClue`，下次构造角色 Context 时自动包含已获得线索。
+- 新增 public/private 消息写入 API；system 消息由后端在开始、推进和结束时记录。
+- 前端 Development / Debug 页面可以选择角色、开始游戏、推进阶段、搜证并查看 Context JSON。
+- 当前没有 AI、Dify、WebSocket、登录、投票或正式游戏界面。
 
-Phase 2 修改了现有 SQLite 表约束并新增线索运行态表，因此已加入轻量 Alembic migration。`create_all` 仍只创建缺失表，不会升级旧表；启动已有 Phase 1 数据库前先执行迁移。迁移保留原有剧本、游戏局、角色及消息。
+Phase 3 增加 `finished` 生命周期状态，并将旧的 `introduction` 初始阶段迁移为 `intro`。升级已有数据库前先执行 Alembic migration；迁移保留旧 `completed` 状态及其他业务记录。`create_all` 仍只创建缺失表，不会升级旧表。
 
 ## 技术栈
 
@@ -127,12 +128,18 @@ npm run dev
 | POST | `/api/games` | 基于 ready Script 创建一局游戏 |
 | GET | `/api/games` | 列出 GameSession，供开发页选择 |
 | GET | `/api/games/{game_id}` | 读取游戏基本状态和四个运行角色 |
+| GET | `/api/games/{game_id}/state` | 读取安全的生命周期、当前阶段、下一阶段与搜证资格 |
 | GET | `/api/games/{game_id}/characters/selectable` | 读取可选角色的公开资料 |
 | POST | `/api/games/{game_id}/select-character` | 选择真人角色并锁定角色分配 |
 | GET | `/api/games/{game_id}/me/character` | 读取本局唯一 human 的公开与本人私密角色卡 |
 | GET | `/api/games/{game_id}/characters/{game_character_id}/context` | Development 专用 Context 调试 |
+| POST | `/api/games/{game_id}/start` | 校验角色分配并开始游戏 |
+| POST | `/api/games/{game_id}/advance-phase` | 按固定顺序推进一个剧情阶段 |
+| GET | `/api/games/{game_id}/investigation/locations` | 读取当前调查阶段的线索地点 |
+| POST | `/api/games/{game_id}/investigation/search` | 为本局角色确定性地授予一条新线索 |
+| POST | `/api/games/{game_id}/messages` | 创建 public/private 消息；system 消息仅由后端产生 |
 
-当前没有登录认证；`/me/character` 依据 GameSession 中唯一的 `human` 角色返回角色卡，因此不能替代真实用户身份校验。Context 调试 API 只在 `APP_ENV=development` 时可用。
+当前没有登录认证；`/me/character` 依据 GameSession 中唯一的 `human` 角色返回角色卡，因此不能替代真实用户身份校验。Context 调试 API 只在 `APP_ENV=development` 时可用。Development 页面中的游戏推进由开发者手动触发，没有 Director 自动推进。
 
 ### 测试与构建
 
@@ -141,6 +148,8 @@ npm run dev
 ```bash
 cd backend
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
+ruff check app tests migrations
+ruff format --check app tests migrations
 ```
 
 在另一个终端执行前端类型检查与构建：
@@ -149,3 +158,13 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
 cd frontend
 npm run build
 ```
+
+### Phase 3 Development 流程
+
+1. 先按“加载开发样例”创建固定测试剧本。
+2. 在 Development 页创建游戏并选择一个真人角色。
+3. 点击 **Start Game**，再用 **Advance Phase** 推进到 `investigation_1`。
+4. 选择搜证地点并搜索；新线索只加入当前真人角色的已知线索。
+5. 点击“查看授权 Context”或在搜证后查看 JSON，确认 `known_clues` 更新。
+
+客户端按钮只是开发辅助；开始、阶段推进和搜证权限由后端 Game Engine 再次校验。
