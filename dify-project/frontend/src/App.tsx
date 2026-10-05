@@ -68,7 +68,7 @@ function App() {
           <span>AI MURDER MYSTERY</span>
         </a>
         <span className="phase-label">
-          PHASE 03 <i /> GAME ENGINE
+          PHASE 04 <i /> CHARACTER CHAT
         </span>
       </header>
 

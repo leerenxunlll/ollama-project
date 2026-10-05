@@ -6,11 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.agents.character_agent import CharacterAgent, get_character_agent
+from app.agents.dify_client import (
+    DifyConfigurationError,
+    DifyError,
+    DifyTimeoutError,
+)
 from app.core.config import settings
 from app.db.session import get_db
 from app.game.character_selection import select_human_character
 from app.game.state_machine import GameRuleError
 from app.models import Character, GameCharacter, GameSession, Message, Script
+from app.schemas.ai import AIChatRequest, AIChatResponse
 from app.schemas.context import CharacterContext
 from app.schemas.game import (
     CharacterSelection,
@@ -25,6 +32,7 @@ from app.schemas.game import (
     PlayerMessageCreate,
     SelectableCharacterRead,
 )
+from app.services.character_chat import send_character_message
 from app.services.character_context import build_character_context
 from app.services.gameplay import (
     advance_game_phase,
@@ -36,6 +44,28 @@ from app.services.gameplay import (
 )
 
 router = APIRouter()
+
+
+@router.post("/games/{game_id}/ai-chat", response_model=AIChatResponse)
+def chat_with_character(
+    game_id: int,
+    payload: AIChatRequest,
+    db: Session = Depends(get_db),
+    agent: CharacterAgent = Depends(get_character_agent),
+) -> AIChatResponse:
+    """Send one private player message to one eligible AI character."""
+    try:
+        return send_character_message(db, game_id, payload, agent)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except DifyConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except DifyTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except DifyError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.get("/games", response_model=list[GameRead])

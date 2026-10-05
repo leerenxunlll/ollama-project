@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -14,13 +15,21 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./ai_murder_mystery.db"
     dify_api_url: str = ""
-    dify_api_key: str = ""
+    dify_character_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("DIFY_CHARACTER_API_KEY", "DIFY_API_KEY"),
+    )
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def dify_character_configured(self) -> bool:
+        """Whether the character chat endpoint has the required Dify settings."""
+        return bool(self.dify_api_url.strip() and self.dify_character_api_key.strip())
 
 
 settings = Settings()

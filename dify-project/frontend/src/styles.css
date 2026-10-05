@@ -719,6 +719,102 @@ h1 em {
   overflow-wrap: anywhere;
 }
 
+.ai-status-pill {
+  border: 1px solid var(--line);
+  padding: 6px 9px;
+  font-size: 10px;
+}
+
+.ai-status-pill.is-loading,
+.ai-status-pill.is-disabled {
+  color: #c9a977;
+}
+
+.ai-status-pill.is-ready {
+  border-color: rgb(135 190 151 / 35%);
+  color: #91bf9d;
+}
+
+.ai-status-pill.is-error {
+  border-color: rgb(210 120 111 / 35%);
+  color: #d8897f;
+}
+
+.ai-chat-form {
+  margin-top: 18px;
+}
+
+.ai-chat-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ai-chat-selectors .field-label,
+.ai-chat-form > .field-label {
+  margin-top: 0;
+}
+
+.ai-chat-input {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  background: #11141b;
+  color: #e9e5dc;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.ai-chat-input::placeholder {
+  color: #696c74;
+}
+
+.ai-chat-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.ai-chat-submit-row .section-caption {
+  margin: 0;
+}
+
+.ai-chat-result {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.ai-chat-message {
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 2%);
+  padding: 13px 15px;
+}
+
+.ai-chat-message span {
+  color: #c7a475;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.ai-chat-message p {
+  margin: 8px 0 0;
+  color: #ddd8cf;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.human-message {
+  margin-left: min(8vw, 80px);
+}
+
 .dev-shell > .dev-message {
   width: min(100%, 1120px);
   margin-inline: auto;
@@ -815,8 +911,14 @@ h1 em {
   }
 
   .private-card-grid,
-  .context-controls {
+  .context-controls,
+  .ai-chat-selectors {
     grid-template-columns: 1fr;
+  }
+
+  .ai-chat-submit-row {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .script-row {

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import {
   createGame,
   advanceGamePhase,
   getCharacterContext,
+  getAiStatus,
   getGame,
   getGameState,
   getGames,
@@ -13,7 +14,10 @@ import {
   getSelectableCharacters,
   selectCharacter,
   searchInvestigationLocation,
+  sendAiChat,
   startGame,
+  type AiChatResponse,
+  type AiStatusResponse,
   type CharacterContext,
   type GameResponse,
   type GameStateResponse,
@@ -54,6 +58,18 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   const [selectedLocation, setSelectedLocation] = useState('')
   const [searchResult, setSearchResult] =
     useState<InvestigationSearchResponse | null>(null)
+  const [aiStatus, setAiStatus] = useState<AiStatusResponse | null>(null)
+  const [aiStatusError, setAiStatusError] = useState('')
+  const [aiChatGameId, setAiChatGameId] = useState<number | null>(null)
+  const [aiTargetCharacterId, setAiTargetCharacterId] = useState<number | null>(
+    null,
+  )
+  const [aiChatContent, setAiChatContent] = useState('')
+  const [aiChatResponse, setAiChatResponse] = useState<AiChatResponse | null>(
+    null,
+  )
+  const [aiChatError, setAiChatError] = useState('')
+  const [aiChatLoading, setAiChatLoading] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -76,8 +92,30 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
         }
       })
 
+    getAiStatus(controller.signal)
+      .then((status) => setAiStatus(status))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setAiStatusError(
+            error instanceof Error ? error.message : '读取 AI 配置状态失败',
+          )
+        }
+      })
+
     return () => controller.abort()
   }, [])
+
+  const inProgressGames = games.filter((item) => item.status === 'in_progress')
+  const aiChatGame = inProgressGames.find((item) => item.id === aiChatGameId)
+  const aiCharacters =
+    aiChatGame?.game_characters.filter(
+      (character) => character.controller_type === 'ai',
+    ) ?? []
+  const selectedAiTargetId = aiCharacters.some(
+    (character) => character.id === aiTargetCharacterId,
+  )
+    ? aiTargetCharacterId
+    : (aiCharacters[0]?.id ?? null)
 
   async function loadGameSession(gameId: number) {
     setGameError('')
@@ -235,6 +273,35 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     }
   }
 
+  async function handleAiChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (
+      aiChatGameId === null ||
+      selectedAiTargetId === null ||
+      aiChatContent.trim() === ''
+    ) {
+      return
+    }
+
+    setAiChatLoading(true)
+    setAiChatError('')
+    setAiChatResponse(null)
+    try {
+      setAiChatResponse(
+        await sendAiChat(
+          aiChatGameId,
+          selectedAiTargetId,
+          aiChatContent.trim(),
+        ),
+      )
+      setAiChatContent('')
+    } catch (error) {
+      setAiChatError(error instanceof Error ? error.message : 'AI 对话失败')
+    } finally {
+      setAiChatLoading(false)
+    }
+  }
+
   return (
     <main className="page-shell dev-shell">
       <header className="topbar">
@@ -253,11 +320,11 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       <section className="dev-intro">
         <p className="eyebrow">
-          <span /> PHASE 03 / DEVELOPMENT DEBUG
+          <span /> PHASE 04 / CHARACTER CHAT DEBUG
         </p>
-        <h1>游戏规则与搜证验证</h1>
+        <h1>游戏规则与 AI 对话验证</h1>
         <p className="description">
-          手动开始游戏、推进剧情阶段并搜证，验证确定性规则与角色线索边界。
+          验证确定性游戏规则、角色信息边界与单个 AI 角色私聊链路。
         </p>
       </section>
 
@@ -617,10 +684,159 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
         </section>
       )}
 
+      <section className="dev-panel detail-panel" aria-label="AI 角色对话调试">
+        <div className="dev-panel-heading">
+          <div>
+            <p className="eyebrow">DEVELOPMENT ONLY</p>
+            <h2>AI Character Chat Debug</h2>
+          </div>
+          <span
+            className={`ai-status-pill ${
+              aiStatusError
+                ? 'is-error'
+                : aiStatus === null
+                  ? 'is-loading'
+                  : aiStatus.configured
+                    ? 'is-ready'
+                    : 'is-disabled'
+            }`}
+            role="status"
+          >
+            {aiStatusError
+              ? '状态读取失败'
+              : aiStatus === null
+                ? '正在检查 AI 配置…'
+                : aiStatus.configured
+                  ? 'AI 已配置'
+                  : 'AI 未配置'}
+          </span>
+        </div>
+
+        {aiStatusError && (
+          <p className="dev-message error-message" role="alert">
+            {aiStatusError}
+          </p>
+        )}
+
+        <form className="ai-chat-form" onSubmit={handleAiChat}>
+          <div className="ai-chat-selectors">
+            <div>
+              <label className="field-label" htmlFor="ai-chat-game-select">
+                进行中的 GameSession
+              </label>
+              <select
+                className="dev-select"
+                id="ai-chat-game-select"
+                value={aiChatGameId ?? ''}
+                disabled={inProgressGames.length === 0}
+                onChange={(event) => {
+                  const gameId = Number(event.target.value)
+                  setAiChatGameId(gameId || null)
+                  setAiTargetCharacterId(null)
+                  setAiChatResponse(null)
+                  setAiChatError('')
+                }}
+              >
+                <option value="">
+                  {inProgressGames.length === 0
+                    ? '没有进行中的游戏'
+                    : '选择 GameSession'}
+                </option>
+                {inProgressGames.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    #{item.id} · Script #{item.script_id}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="field-label" htmlFor="ai-chat-character-select">
+                AI 角色
+              </label>
+              <select
+                className="dev-select"
+                id="ai-chat-character-select"
+                value={selectedAiTargetId ?? ''}
+                disabled={aiCharacters.length === 0}
+                onChange={(event) => {
+                  setAiTargetCharacterId(Number(event.target.value) || null)
+                  setAiChatResponse(null)
+                  setAiChatError('')
+                }}
+              >
+                {aiCharacters.length === 0 && (
+                  <option value="">先选择有 AI 角色的游戏</option>
+                )}
+                {aiCharacters.map((character) => (
+                  <option key={character.id} value={character.id}>
+                    {character.character.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <label className="field-label" htmlFor="ai-chat-content">
+            发给角色的话
+          </label>
+          <textarea
+            className="ai-chat-input"
+            id="ai-chat-content"
+            rows={3}
+            value={aiChatContent}
+            placeholder="输入一条测试消息…"
+            onChange={(event) => setAiChatContent(event.target.value)}
+          />
+          <div className="ai-chat-submit-row">
+            {!aiStatus?.configured && (
+              <p className="section-caption">
+                配置 Dify 后端密钥后即可发送测试消息。
+              </p>
+            )}
+            <button
+              className="action-button"
+              type="submit"
+              disabled={
+                !aiStatus?.configured ||
+                aiChatGameId === null ||
+                selectedAiTargetId === null ||
+                aiChatContent.trim() === '' ||
+                aiChatLoading
+              }
+            >
+              {aiChatLoading ? '等待 AI 回复…' : '发送测试消息'}
+            </button>
+          </div>
+        </form>
+
+        {aiChatError && (
+          <p className="dev-message error-message" role="alert">
+            {aiChatError}
+          </p>
+        )}
+        {aiChatResponse && (
+          <div className="ai-chat-result" aria-live="polite">
+            <article className="ai-chat-message human-message">
+              <span>
+                玩家 →{' '}
+                {aiCharacters.find((item) => item.id === selectedAiTargetId)
+                  ?.character.name ?? 'AI 角色'}
+              </span>
+              <p>{aiChatResponse.human_message.content}</p>
+            </article>
+            <article className="ai-chat-message">
+              <span>AI 角色回复</span>
+              <p>{aiChatResponse.ai_message.content}</p>
+            </article>
+          </div>
+        )}
+      </section>
+
       <footer className="footer">
-        <span>仅用于验证角色分配与信息边界</span>
+        <span>仅用于验证角色信息边界与 AI 对话链路</span>
         <span className="footer-mark">
-          PHASE 03 <i /> DEVELOPMENT DEBUG
+          PHASE 04 <i /> DEVELOPMENT DEBUG
         </span>
       </footer>
     </main>

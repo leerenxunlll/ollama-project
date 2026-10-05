@@ -1,8 +1,8 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前 **Phase 3：Game Engine、游戏状态机与确定性搜证规则** 已完成。当前没有 Dify 或 LLM 调用。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前进入 **Phase 4：Dify 基础接入与单 Character Agent 私聊闭环**。本阶段只让真人玩家与一个指定 AI 角色完成一轮私聊，不启用多 Agent 协作、AI 主动发言或长期记忆。
 
-## 当前 Phase 3
+## Phase 3 已完成
 
 - 在角色选择完成后由 Game Engine 校验并开始游戏，按固定顺序手动推进剧情阶段。
 - 仅在 `investigation_1` / `investigation_2` 阶段允许搜证，分别匹配 `act_1` / `act_2` 线索。
@@ -10,9 +10,23 @@ AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本�
 - Context Builder 只读 `GameCharacterClue`，下次构造角色 Context 时自动包含已获得线索。
 - 新增 public/private 消息写入 API；system 消息由后端在开始、推进和结束时记录。
 - 前端 Development / Debug 页面可以选择角色、开始游戏、推进阶段、搜证并查看 Context JSON。
-- 当前没有 AI、Dify、WebSocket、登录、投票或正式游戏界面。
+- Phase 3 本身不包含 AI、Dify 或 WebSocket。
 
 Phase 3 增加 `finished` 生命周期状态，并将旧的 `introduction` 初始阶段迁移为 `intro`。升级已有数据库前先执行 Alembic migration；迁移保留旧 `completed` 状态及其他业务记录。`create_all` 仍只创建缺失表，不会升级旧表。
+
+## Phase 4 范围
+
+本阶段的 AI 调用链为：
+
+```text
+Human Player → FastAPI Game Service → CharacterContextBuilder → CharacterAgent → DifyClient → Dify Chatflow
+```
+
+仅开放 `GET /api/ai/status` 配置检查和 `POST /api/games/{game_id}/ai-chat` 单角色私聊。请求只允许真人向同一局中指定的 AI 角色发送 private message。Character Agent 接收经过 Context Builder 权限过滤的 `CharacterContext` 与本轮玩家消息，不接触数据库 Session 或 ORM。
+
+Dify 只生成角色台词，不持有权威游戏状态或长期对话记忆。每轮调用以数据库中的授权消息和角色 Context 为依据；后端只在 Dify 返回有效台词后将玩家消息与 AI 回复作为一轮一起持久化。Dify 调用失败时不会留下半轮消息。未配置 Dify 时后端仍可启动，只有 AI 请求不可用。Chatflow 输入和 System Instruction 见 [Dify Character Chatflow 配置](docs/dify-character-chatflow.md)。
+
+Development / Debug 页面提供 AI Character Chat Debug，可查看配置状态、选择进行中的游戏和 AI 角色、发送一条私聊并查看玩家消息与角色回复。接口使用 `404` 表示游戏或目标不存在，`409` 表示游戏状态/角色不符合调用条件，`503` 表示 Dify 未配置，`504` 表示 Dify 超时，`502` 表示 Dify 连接、认证、上游请求或响应错误。
 
 ## 技术栈
 
@@ -21,7 +35,7 @@ Phase 3 增加 `finished` 生命周期状态，并将旧的 `introduction` 初�
 | 前端 | React、TypeScript、Vite、原生 CSS |
 | 后端 | Python、FastAPI、Pydantic、SQLAlchemy 2.x |
 | 数据库 | SQLite |
-| AI 平台 | Dify 配置占位；当前不发起 API 请求 |
+| AI 平台 | Dify Chatflow；本阶段仅用于单 AI 角色私聊 |
 
 ## 目录结构
 
@@ -29,14 +43,14 @@ Phase 3 增加 `finished` 生命周期状态，并将旧的 `introduction` 初�
 .
 ├── backend/
 │   ├── app/
-│   │   ├── agents/             # 后续 AI 编排与 Dify 集成
+│   │   ├── agents/             # Character Agent 与 Dify HTTP client
 │   │   ├── api/                # FastAPI 路由
 │   │   ├── core/               # 应用配置
 │   │   ├── db/                 # Engine、Session、Base、建表
 │   │   ├── game/               # 确定性规则与角色分配
 │   │   ├── models/             # SQLAlchemy 持久化模型
 │   │   ├── schemas/            # API 与角色 Context 结构
-│   │   ├── services/           # Context Builder 与开发 seed
+│   │   ├── services/           # Character Context / chat service 与开发 seed
 │   │   ├── main.py             # FastAPI 应用入口
 │   │   └── seed.py             # 开发数据命令入口
 │   ├── migrations/             # Alembic 数据库迁移
@@ -113,7 +127,18 @@ npm run dev
 
 ### 配置与本地通信
 
-将 `.env.example` 复制为项目根目录的 `.env`。后端通过 Pydantic Settings 读取 `APP_NAME`、`APP_ENV`、`DATABASE_URL`、`DIFY_API_URL` 和 `DIFY_API_KEY`。当前不需要真实 Dify 密钥；真实 `.env` 已在 `.gitignore` 中排除。
+将 `.env.example` 复制为项目根目录的 `.env`。后端通过 Pydantic Settings 读取 `APP_NAME`、`APP_ENV`、`DATABASE_URL`、`DIFY_API_URL` 和 `DIFY_CHARACTER_API_KEY`。本阶段只使用 Character Dify App 的 Key；未来 Character、Director、Writer 应各自使用不同的 API Key。当前设置兼容读取旧名 `DIFY_API_KEY`；新配置请统一使用 `DIFY_CHARACTER_API_KEY`。迁移旧 `.env` 时，将旧变量改名并删除旧名，避免配置重复。真实密钥只放在本地 `.env`，不要写入代码、文档或 `.env.example`；真实 `.env` 已在 `.gitignore` 中排除。
+
+### Real Dify smoke test
+
+只有在本地 `.env` 配置了真实 `DIFY_API_URL` 和 `DIFY_CHARACTER_API_KEY`，且 Dify Chatflow 已发布后才执行。启动 FastAPI 并准备一个状态为 `in_progress` 的游戏和一个 AI 角色，然后运行：
+
+```bash
+curl http://127.0.0.1:8000/api/ai/status
+curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: application/json' -d '{"target_game_character_id": 456, "content": "你昨晚在哪里？"}'
+```
+
+将示例中的 `123` 和 `456` 替换为正在进行的游戏 ID 与该局 AI 角色 ID。第一条请求只检查 `configured`，第二条验证真人到 AI 角色的完整调用和消息持久化链。自动测试应使用 Mock Dify，不要求真实 API Key 或外网服务。不要把密钥复制到命令历史、终端输出或前端代码中。
 
 前端默认请求相对路径 `/api/...`。`frontend/vite.config.ts` 将开发环境的 `/api` 请求代理到 `VITE_API_PROXY_TARGET`（默认 `http://127.0.0.1:8000`），因此本地开发不需要额外 CORS 配置。需要指定 API origin 时，可设置 `VITE_API_BASE_URL`；不要把生产地址写进代码。
 
@@ -133,6 +158,8 @@ npm run dev
 | POST | `/api/games/{game_id}/select-character` | 选择真人角色并锁定角色分配 |
 | GET | `/api/games/{game_id}/me/character` | 读取本局唯一 human 的公开与本人私密角色卡 |
 | GET | `/api/games/{game_id}/characters/{game_character_id}/context` | Development 专用 Context 调试 |
+| GET | `/api/ai/status` | 检查 Character Dify 配置是否可用，不返回密钥 |
+| POST | `/api/games/{game_id}/ai-chat` | 真人向本局一个 AI 角色发送私聊并保存完整消息轮次 |
 | POST | `/api/games/{game_id}/start` | 校验角色分配并开始游戏 |
 | POST | `/api/games/{game_id}/advance-phase` | 按固定顺序推进一个剧情阶段 |
 | GET | `/api/games/{game_id}/investigation/locations` | 读取当前调查阶段的线索地点 |

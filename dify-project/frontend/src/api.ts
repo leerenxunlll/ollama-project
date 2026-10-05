@@ -3,6 +3,25 @@ export interface HealthResponse {
   app: string
 }
 
+export interface AiStatusResponse {
+  configured: boolean
+}
+
+export interface MessageRead {
+  id: number
+  game_session_id: number
+  sender_game_character_id: number
+  channel_type: string
+  receiver_game_character_id: number | null
+  content: string
+  created_at: string
+}
+
+export interface AiChatResponse {
+  human_message: MessageRead
+  ai_message: MessageRead
+}
+
 export interface ScriptSummary {
   id: number
   title: string
@@ -212,6 +231,25 @@ async function requestJson<T>(
 
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return requestJson('/api/health', { signal })
+}
+
+export function getAiStatus(signal?: AbortSignal): Promise<AiStatusResponse> {
+  return requestJson('/api/ai/status', { signal })
+}
+
+export function sendAiChat(
+  gameId: number,
+  targetGameCharacterId: number,
+  content: string,
+): Promise<AiChatResponse> {
+  return requestJson(`/api/games/${gameId}/ai-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      target_game_character_id: targetGameCharacterId,
+      content,
+    }),
+  })
 }
 
 export function getScripts(signal?: AbortSignal): Promise<ScriptSummary[]> {
