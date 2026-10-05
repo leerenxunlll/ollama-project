@@ -14,7 +14,7 @@ export interface ScriptSummary {
 export interface GameCharacterSummary {
   id: number
   character_id: number
-  controller_type: 'human' | 'ai'
+  controller_type: 'human' | 'ai' | null
   character: {
     id: number
     name: string
@@ -30,6 +30,73 @@ export interface GameResponse {
   started_at: string | null
   ended_at: string | null
   game_characters: GameCharacterSummary[]
+}
+
+export interface SelectableCharacter {
+  game_character_id: number
+  character_id: number
+  name: string
+  age: number | null
+  identity: string
+  public_background: string
+  personality: string
+  speaking_style: string
+}
+
+export interface MyCharacterCard extends SelectableCharacter {
+  private_background: string
+  personal_goal: string
+  current_emotion: string | null
+  current_goal: string | null
+}
+
+export interface CharacterContext {
+  game: {
+    id: number
+    status: string
+    current_phase: string
+  }
+  character: {
+    game_character_id: number
+    character_id: number
+    name: string
+    identity: string
+    public_background: string
+    private_background: string
+    personality: string
+    speaking_style: string
+    personal_goal: string
+    current_emotion: string | null
+    current_goal: string | null
+  }
+  other_characters: Array<{
+    game_character_id: number
+    name: string
+    identity: string
+    public_background: string
+  }>
+  public_messages: ContextMessage[]
+  private_messages: ContextMessage[]
+  known_clues: Array<{
+    clue_id: number
+    name: string
+    description: string
+    act: string
+    location: string
+    is_core: boolean
+    importance: number
+    discovered_at: string
+    source: string | null
+  }>
+}
+
+export interface ContextMessage {
+  id: number
+  sender_game_character_id: number | null
+  channel_type: 'public' | 'private' | 'system'
+  receiver_game_character_id: number | null
+  content: string
+  created_at: string
 }
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
@@ -90,6 +157,10 @@ export function getScripts(signal?: AbortSignal): Promise<ScriptSummary[]> {
   return requestJson('/api/scripts', { signal })
 }
 
+export function getGames(signal?: AbortSignal): Promise<GameResponse[]> {
+  return requestJson('/api/games', { signal })
+}
+
 export function createGame(scriptId: number): Promise<GameResponse> {
   return requestJson('/api/games', {
     method: 'POST',
@@ -100,4 +171,34 @@ export function createGame(scriptId: number): Promise<GameResponse> {
 
 export function getGame(gameId: number): Promise<GameResponse> {
   return requestJson(`/api/games/${gameId}`)
+}
+
+export function getSelectableCharacters(
+  gameId: number,
+): Promise<SelectableCharacter[]> {
+  return requestJson(`/api/games/${gameId}/characters/selectable`)
+}
+
+export function selectCharacter(
+  gameId: number,
+  gameCharacterId: number,
+): Promise<GameResponse> {
+  return requestJson(`/api/games/${gameId}/select-character`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ game_character_id: gameCharacterId }),
+  })
+}
+
+export function getMyCharacter(gameId: number): Promise<MyCharacterCard> {
+  return requestJson(`/api/games/${gameId}/me/character`)
+}
+
+export function getCharacterContext(
+  gameId: number,
+  gameCharacterId: number,
+): Promise<CharacterContext> {
+  return requestJson(
+    `/api/games/${gameId}/characters/${gameCharacterId}/context`,
+  )
 }

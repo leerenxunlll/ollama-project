@@ -1,16 +1,17 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前 **Phase 1：核心游戏数据模型与信息边界** 已完成。当前没有 Dify 或 LLM 调用。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前 **Phase 2：角色选择、信息访问控制与 Agent Context Builder** 已完成。当前没有 Dify 或 LLM 调用。
 
-## 当前 Phase 1
+## 当前 Phase 2
 
-- 建立 Script、Character、Clue、GameSession、GameCharacter 与 Message 数据模型。
-- 提供创建/读取 Script，以及从 ready Script 启动和读取 GameSession 的 API。
-- 提供手动、幂等的开发样例 seed，包含四个角色和三条线索。
-- 前端开发验证页可以查看 ready Script、创建游戏并查看四个运行角色。
-- SQLite 表在 FastAPI 启动时创建；数据库迁移暂未引入。
+- 保留 Phase 1 的剧本模板、游戏运行实例、消息与四角色开发 seed。
+- 新游戏先处于 `waiting_for_character_selection`；真人选择后锁定为 1 个 `human` 与 3 个 `ai`，游戏状态进入 `ready`。
+- 角色选择 API 与真人角色卡 API 使用公开/私有字段白名单。
+- Context Builder 位于后端 `services/`，按当前角色过滤其他角色资料、消息和已知线索。
+- 前端 Development / Debug 页面可选择 GameSession、分配真人角色并查看自己的角色卡与开发 Context。
+- `DirectorContext` 目前只有 Pydantic schema；没有 Director、LLM 或 Dify 调用。
 
-本阶段暂不引入 Alembic：当前是单人本地开发，数据库表刚建立，没有需要保留并升级的旧业务数据。开始需要在保留用户数据的前提下变更表结构，或进入多人协作/部署前，应加入 Alembic migration；`create_all` 只负责创建缺失表，不会升级已有表。
+Phase 2 修改了现有 SQLite 表约束并新增线索运行态表，因此已加入轻量 Alembic migration。`create_all` 仍只创建缺失表，不会升级旧表；启动已有 Phase 1 数据库前先执行迁移。迁移保留原有剧本、游戏局、角色及消息。
 
 ## 技术栈
 
@@ -31,12 +32,14 @@ AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本�
 │   │   ├── api/                # FastAPI 路由
 │   │   ├── core/               # 应用配置
 │   │   ├── db/                 # Engine、Session、Base、建表
-│   │   ├── game/               # 后续确定性游戏规则
+│   │   ├── game/               # 确定性规则与角色分配
 │   │   ├── models/             # SQLAlchemy 持久化模型
-│   │   ├── schemas/            # API 请求与响应结构
-│   │   ├── services/           # 应用服务与开发 seed
+│   │   ├── schemas/            # API 与角色 Context 结构
+│   │   ├── services/           # Context Builder 与开发 seed
 │   │   ├── main.py             # FastAPI 应用入口
 │   │   └── seed.py             # 开发数据命令入口
+│   ├── migrations/             # Alembic 数据库迁移
+│   ├── alembic.ini             # Alembic 配置
 │   ├── tests/                  # 后端 API 与数据模型测试
 │   ├── pyproject.toml          # 后端依赖、pytest 与 Ruff 配置
 │   └── requirements.txt        # 兼容入口，依赖版本以 pyproject.toml 为准
@@ -67,6 +70,16 @@ cd ..
 
 后端依赖版本集中维护在 `backend/pyproject.toml`：运行依赖列在 `[project].dependencies`，测试与格式工具列在 `[project.optional-dependencies].dev`。`backend/requirements.txt` 只是便于 pip 安装的兼容入口，不再单独维护版本号。
 
+### 数据库迁移
+
+首次启动或升级 Phase 1 数据库前，在项目根目录执行：
+
+```bash
+alembic -c backend/alembic.ini upgrade head
+```
+
+迁移连接使用 `.env` 中的 `DATABASE_URL`。如果 Alembic 尚未安装，重新执行 `cd backend && pip install -r requirements.txt`。
+
 ### 启动后端
 
 ```bash
@@ -95,7 +108,7 @@ npm install
 npm run dev
 ```
 
-打开 Vite 输出的本地地址，默认是 <http://localhost:5173>。首页“载入剧本”进入 Phase 1 开发验证页。
+打开 Vite 输出的本地地址，默认是 <http://localhost:5173>。首页“载入剧本”进入 Phase 2 Development / Debug 页面。
 
 ### 配置与本地通信
 
@@ -112,7 +125,14 @@ npm run dev
 | GET | `/api/scripts` | 列出 Script 元数据 |
 | GET | `/api/scripts/{script_id}` | 读取 Script 元数据 |
 | POST | `/api/games` | 基于 ready Script 创建一局游戏 |
+| GET | `/api/games` | 列出 GameSession，供开发页选择 |
 | GET | `/api/games/{game_id}` | 读取游戏基本状态和四个运行角色 |
+| GET | `/api/games/{game_id}/characters/selectable` | 读取可选角色的公开资料 |
+| POST | `/api/games/{game_id}/select-character` | 选择真人角色并锁定角色分配 |
+| GET | `/api/games/{game_id}/me/character` | 读取本局唯一 human 的公开与本人私密角色卡 |
+| GET | `/api/games/{game_id}/characters/{game_character_id}/context` | Development 专用 Context 调试 |
+
+当前没有登录认证；`/me/character` 依据 GameSession 中唯一的 `human` 角色返回角色卡，因此不能替代真实用户身份校验。Context 调试 API 只在 `APP_ENV=development` 时可用。
 
 ### 测试与构建
 

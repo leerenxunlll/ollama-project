@@ -16,7 +16,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.script import Character, Script
+    from app.models.script import Character, Clue, Script
 
 
 class GameSession(Base):
@@ -25,7 +25,9 @@ class GameSession(Base):
     __tablename__ = "game_sessions"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('in_progress', 'completed', 'abandoned')",
+            "status IN ("
+            "'waiting_for_character_selection', 'ready', 'in_progress', "
+            "'completed', 'abandoned')",
             name="ck_game_sessions_status",
         ),
     )
@@ -33,7 +35,7 @@ class GameSession(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(20), default="in_progress", nullable=False
+        String(50), default="waiting_for_character_selection", nullable=False
     )
     current_phase: Mapped[str] = mapped_column(
         String(80), default="introduction", nullable=False
@@ -67,7 +69,8 @@ class GameCharacter(Base):
             "game_session_id", "character_id", name="uq_game_character_per_session"
         ),
         CheckConstraint(
-            "controller_type IN ('human', 'ai')", name="ck_game_characters_controller"
+            "controller_type IS NULL OR controller_type IN ('human', 'ai')",
+            name="ck_game_characters_controller",
         ),
     )
 
@@ -78,7 +81,7 @@ class GameCharacter(Base):
     character_id: Mapped[int] = mapped_column(
         ForeignKey("characters.id"), nullable=False
     )
-    controller_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    controller_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     current_emotion: Mapped[str | None] = mapped_column(String(120), nullable=True)
     current_goal: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -92,6 +95,35 @@ class GameCharacter(Base):
         back_populates="receiver_game_character",
         foreign_keys="Message.receiver_game_character_id",
     )
+    clue_discoveries: Mapped[list["GameCharacterClue"]] = relationship(
+        back_populates="game_character"
+    )
+
+
+class GameCharacterClue(Base):
+    """A clue explicitly known by one character during one game."""
+
+    __tablename__ = "game_character_clues"
+    __table_args__ = (
+        UniqueConstraint("game_character_id", "clue_id", name="uq_game_character_clue"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_character_id: Mapped[int] = mapped_column(
+        ForeignKey("game_characters.id"), nullable=False
+    )
+    clue_id: Mapped[int] = mapped_column(ForeignKey("clues.id"), nullable=False)
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    game_character: Mapped["GameCharacter"] = relationship(
+        back_populates="clue_discoveries"
+    )
+    clue: Mapped["Clue"] = relationship(back_populates="game_character_clues")
 
 
 class Message(Base):

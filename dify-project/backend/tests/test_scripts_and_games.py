@@ -64,11 +64,25 @@ def test_game_uses_four_instances_without_changing_templates(
     assert created.status_code == 201
     game_data = created.json()
     assert game_data["script_id"] == script.id
+    assert game_data["status"] == "waiting_for_character_selection"
     assert len(game_data["game_characters"]) == 4
     assert [item["controller_type"] for item in game_data["game_characters"]] == [
+        None,
+        None,
+        None,
+        None,
+    ]
+
+    selected = client.post(
+        f"/api/games/{game_data['id']}/select-character",
+        json={"game_character_id": game_data["game_characters"][2]["id"]},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["status"] == "ready"
+    assert [item["controller_type"] for item in selected.json()["game_characters"]] == [
+        "ai",
+        "ai",
         "human",
-        "ai",
-        "ai",
         "ai",
     ]
 
@@ -82,6 +96,7 @@ def test_game_uses_four_instances_without_changing_templates(
     second_game = client.post("/api/games", json={"script_id": script.id})
     assert second_game.status_code == 201
     assert second_game.json()["id"] != game_data["id"]
+    assert second_game.json()["status"] == "waiting_for_character_selection"
 
     db_session.expire_all()
     session = db_session.get(GameSession, game_data["id"])

@@ -67,7 +67,9 @@ function App() {
           </span>
           <span>AI MURDER MYSTERY</span>
         </a>
-        <span className="phase-label">PHASE 01 <i /> DATA MODEL CHECK</span>
+        <span className="phase-label">
+          PHASE 02 <i /> INFORMATION BOUNDARY
+        </span>
       </header>
 
       <section className="intro" id="home">

@@ -554,6 +554,126 @@ h1 em {
   color: #919cb3;
 }
 
+.controller-unassigned {
+  color: #c9a977;
+}
+
+.field-label,
+.section-caption,
+.debug-note {
+  display: block;
+  margin: 18px 0 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.dev-select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #11141b;
+  color: #e9e5dc;
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.role-card-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.role-card {
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 2%);
+  padding: 15px;
+}
+
+.role-card h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.role-card > p {
+  margin: 10px 0 0;
+  color: #aaa9a7;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.role-card .role-card-traits {
+  color: #81848c;
+  font-size: 10px;
+}
+
+.role-card .action-button {
+  margin-top: 14px;
+}
+
+.detail-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1120px);
+  margin: 16px auto 0;
+}
+
+.private-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 20px 0 0;
+}
+
+.private-card-grid div {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.private-card-grid dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.private-card-grid dd {
+  margin: 0;
+  color: #e0d7c9;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.context-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 2fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.context-controls .field-label {
+  margin-bottom: 10px;
+}
+
+.context-viewer {
+  max-height: 440px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #080a0f;
+  color: #b8c8bb;
+  padding: 16px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dev-shell > .dev-message {
+  width: min(100%, 1120px);
+  margin-inline: auto;
+}
+
 @keyframes rotate {
   to {
     transform: rotate(360deg);
@@ -637,6 +757,11 @@ h1 em {
 
   .dev-panel {
     padding: 17px;
+  }
+
+  .private-card-grid,
+  .context-controls {
+    grid-template-columns: 1fr;
   }
 
   .script-row {

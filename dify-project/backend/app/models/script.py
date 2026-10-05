@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.game import GameCharacter, GameSession
+    from app.models.game import GameCharacter, GameCharacterClue, GameSession
 
 
 class Script(Base):
@@ -93,3 +93,6 @@ class Clue(Base):
     )
 
     script: Mapped["Script"] = relationship(back_populates="clues")
+    game_character_clues: Mapped[list["GameCharacterClue"]] = relationship(
+        back_populates="clue"
+    )
