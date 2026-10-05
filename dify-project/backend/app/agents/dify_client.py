@@ -77,6 +77,10 @@ class DifyClient:
             raise DifyTimeoutError("Dify chat request timed out") from error
         except httpx.RequestError as error:
             raise DifyConnectionError("Could not connect to Dify") from error
+        except ValueError as error:
+            raise DifyConnectionError(
+                "Dify HTTP client configuration is invalid; check proxy settings"
+            ) from error
 
         if response.status_code == 401:
             raise DifyAuthenticationError("Dify rejected the character API key")

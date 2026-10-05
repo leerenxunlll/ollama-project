@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.agents.character_agent import CharacterAgent, get_character_agent
+from app.agents.character_agent import (
+    CharacterAgent,
+    CharacterOutputValidationError,
+    get_character_agent,
+)
 from app.agents.dify_client import (
     DifyConfigurationError,
     DifyError,
@@ -16,8 +20,22 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.game.character_selection import select_human_character
 from app.game.state_machine import GameRuleError
-from app.models import Character, GameCharacter, GameSession, Message, Script
-from app.schemas.ai import AIChatRequest, AIChatResponse
+from app.models import (
+    Character,
+    CharacterMemory,
+    CharacterThought,
+    GameCharacter,
+    GameSession,
+    Message,
+    Script,
+)
+from app.schemas.ai import (
+    AIChatRequest,
+    AIChatResponse,
+    CharacterDebugStateRead,
+    CharacterMemoryRead,
+    CharacterThoughtRead,
+)
 from app.schemas.context import CharacterContext
 from app.schemas.game import (
     CharacterSelection,
@@ -65,6 +83,8 @@ def chat_with_character(
     except DifyTimeoutError as error:
         raise HTTPException(status_code=504, detail=str(error)) from error
     except DifyError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except CharacterOutputValidationError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
@@ -371,3 +391,62 @@ def get_character_context(
         return build_character_context(db, game_id, game_character_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get(
+    "/games/{game_id}/characters/{game_character_id}/thoughts",
+    response_model=CharacterDebugStateRead,
+)
+def get_character_thoughts(
+    game_id: int,
+    game_character_id: int,
+    db: Session = Depends(get_db),
+) -> CharacterDebugStateRead:
+    """Expose private character state only in development for debugging."""
+    if settings.app_env != "development":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    game_character = db.scalar(
+        select(GameCharacter).where(
+            GameCharacter.id == game_character_id,
+            GameCharacter.game_session_id == game_id,
+        )
+    )
+    if game_character is None or game_character.controller_type != "ai":
+        raise HTTPException(status_code=404, detail="AI character not found")
+
+    latest_thought = db.scalar(
+        select(CharacterThought)
+        .where(
+            CharacterThought.game_session_id == game_id,
+            CharacterThought.game_character_id == game_character_id,
+        )
+        .order_by(CharacterThought.created_at.desc(), CharacterThought.id.desc())
+        .limit(1)
+    )
+    memories = list(
+        db.scalars(
+            select(CharacterMemory)
+            .where(
+                CharacterMemory.game_session_id == game_id,
+                CharacterMemory.game_character_id == game_character_id,
+            )
+            .order_by(
+                CharacterMemory.importance.desc(),
+                CharacterMemory.created_at.desc(),
+                CharacterMemory.id.desc(),
+            )
+            .limit(20)
+        ).all()
+    )
+    return CharacterDebugStateRead(
+        game_id=game_id,
+        game_character_id=game_character_id,
+        current_emotion=game_character.current_emotion,
+        latest_thought=(
+            CharacterThoughtRead.model_validate(latest_thought)
+            if latest_thought is not None
+            else None
+        ),
+        memories=[CharacterMemoryRead.model_validate(memory) for memory in memories],
+    )

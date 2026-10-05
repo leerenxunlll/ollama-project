@@ -1,9 +1,18 @@
 """Tests that character contexts enforce information boundaries."""
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Clue, GameCharacter, GameCharacterClue, Message
+from app.models import (
+    CharacterMemory,
+    CharacterThought,
+    Clue,
+    GameCharacter,
+    GameCharacterClue,
+    Message,
+)
 from app.services.seed import seed_development_data
 
 
@@ -95,6 +104,40 @@ def test_character_context_filters_messages_secrets_clues_and_seed(
             source="test grant",
         )
     )
+    db_session.flush()
+    own_source = db_session.scalar(
+        select(Message).where(Message.content == "公开系统旁白")
+    )
+    other_source = db_session.scalar(
+        select(Message).where(Message.content == "其他角色之间的私聊")
+    )
+    assert own_source is not None and other_source is not None
+    db_session.add_all(
+        [
+            CharacterMemory(
+                game_session_id=game_id,
+                game_character_id=selected_character_id,
+                content="SELF_MEMORY_SENTINEL",
+                importance=4,
+                source_message_id=own_source.id,
+            ),
+            CharacterMemory(
+                game_session_id=game_id,
+                game_character_id=character_ids[1],
+                content="OTHER_MEMORY_SENTINEL",
+                importance=5,
+                source_message_id=other_source.id,
+            ),
+            CharacterThought(
+                game_session_id=game_id,
+                game_character_id=character_ids[1],
+                ai_message_id=other_source.id,
+                inner_os="OTHER_THOUGHT_SENTINEL",
+                emotion="suspicious",
+                intent="hide_information",
+            ),
+        ]
+    )
     db_session.commit()
 
     response = client.get(
@@ -136,6 +179,9 @@ def test_character_context_filters_messages_secrets_clues_and_seed(
 
     assert [item["clue_id"] for item in context["known_clues"]] == [clue.id]
     assert len(context["known_clues"]) == 1
+    assert [item["content"] for item in context["memories"]] == ["SELF_MEMORY_SENTINEL"]
+    assert "OTHER_MEMORY_SENTINEL" not in str(context)
+    assert "OTHER_THOUGHT_SENTINEL" not in str(context)
     assert "random_seed" not in context["game"]
     assert "is_killer" not in str(context)
     assert "private_background" not in context["other_characters"][0]
@@ -176,3 +222,64 @@ def test_context_debug_route_is_development_only(
     )
 
     assert response.status_code == 404
+
+
+def test_context_uses_recent_message_limits_and_priority_memory_limit(
+    client, db_session: Session
+) -> None:
+    game_data = _create_game(client, db_session)
+    game_id = game_data["id"]
+    character_ids = [item["id"] for item in game_data["game_characters"]]
+    system_message = Message(
+        game_session_id=game_id,
+        sender_game_character_id=None,
+        channel_type="system",
+        content="memory source",
+    )
+    db_session.add(system_message)
+    db_session.flush()
+    baseline = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for index in range(25):
+        db_session.add_all(
+            [
+                Message(
+                    game_session_id=game_id,
+                    sender_game_character_id=character_ids[0],
+                    channel_type="public",
+                    content=f"public-{index}",
+                ),
+                Message(
+                    game_session_id=game_id,
+                    sender_game_character_id=character_ids[0],
+                    channel_type="private",
+                    receiver_game_character_id=character_ids[1],
+                    content=f"private-{index}",
+                ),
+                CharacterMemory(
+                    game_session_id=game_id,
+                    game_character_id=character_ids[1],
+                    content=f"memory-{index}",
+                    importance=1 + index % 5,
+                    source_message_id=system_message.id,
+                    created_at=baseline + timedelta(minutes=index),
+                ),
+            ]
+        )
+    db_session.commit()
+
+    response = client.get(f"/api/games/{game_id}/characters/{character_ids[1]}/context")
+
+    assert response.status_code == 200
+    context = response.json()
+    assert len(context["public_messages"]) == 20
+    assert context["public_messages"][0]["content"] == "public-5"
+    assert context["public_messages"][-1]["content"] == "public-24"
+    assert len(context["private_messages"]) == 20
+    assert context["private_messages"][0]["content"] == "private-5"
+    assert context["private_messages"][-1]["content"] == "private-24"
+    assert len(context["memories"]) == 20
+    assert context["memories"] == sorted(
+        context["memories"],
+        key=lambda memory: (memory["importance"], memory["created_at"]),
+        reverse=True,
+    )

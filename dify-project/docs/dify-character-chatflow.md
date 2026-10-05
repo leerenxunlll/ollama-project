@@ -1,56 +1,124 @@
 # Dify Character Chatflow 配置
 
-本文定义 Phase 4 后端 CharacterAgent 调用的 Chatflow 契约。此工作流只负责依据已授权的角色 Context 生成一段角色台词，不执行工具调用或游戏操作。
+Phase 5 将 Character Chatflow 的输出从单独台词升级为结构化 JSON。Dify 仍只负责生成角色回复；后端负责校验、权限判断和持久化。
 
-## 创建 Chatflow
+## 更新现有 Chatflow
 
-1. 在 Dify 中创建并发布一个 **Chatflow**，配置可用的 LLM 节点。
-2. 在开始节点增加必填文本输入 `character_context`。后端会把经 Pydantic 验证的 `CharacterContext` 序列化为 JSON 字符串传入。
-3. 将系统变量 `sys.query` 连接到 LLM 节点的 User 内容，作为玩家当前发送的消息。使用 Dify 的变量选择器引用变量，避免手动输入错误的节点变量路径。
-4. 将 LLM 节点的文本输出连接到 Answer 节点，作为本轮角色说出的台词。
-5. 发布 Chatflow，并在项目后端配置该 Chatflow 对应的 API URL 与应用 API Key。
+1. 打开当前已发布的 Character Chatflow，编辑原 LLM 节点。
+2. 启用 **Structured Output**，把下方 JSON Schema 导入结构化输出配置。
+3. 确认开始节点仍提供 `character_context` 文本变量；它现在还会包含当前角色自己的有限记忆。
+4. 将玩家输入 `sys.query` 连接到 LLM 节点的 User 内容。
+5. 将结构化输出交给 Answer 节点。Answer 的最终 `answer` 必须是一个 JSON 字符串，不能添加说明文字或 Markdown code fence。
+6. 保存并重新发布 Chatflow，然后按 README 的真实 Dify smoke test 重新验证。
 
-应用应提供 `character_context` 输入变量，接收本轮玩家文本的 `query`，并返回非空文本回答。后端使用 blocking 请求，不依赖 Dify conversation 历史；每次请求的 `conversation_id` 为空。Dify 的对话记录不是游戏记忆来源。
+如果当前模型不支持 Dify 的 Structured Output，建议在 Dify 中选择支持该功能的模型。也可以先用提示词要求输出该格式，但后端仍会严格校验；格式错误时本轮不会写入数据库。
 
-后端调用 Dify 的 `POST {DIFY_API_URL}/chat-messages` 请求形态如下。`user` 是不含玩家真实身份信息的稳定内部标识；请求不携带真实密钥示例。
+## Structured Output Schema
 
 ```json
 {
-  "inputs": {
-    "character_context": "<经过校验的 CharacterContext JSON 字符串>"
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "speech": {
+      "type": "string",
+      "minLength": 1,
+      "description": "角色实际说出口的话"
+    },
+    "inner_os": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "一到两句简短的私人内心独白，不包含完整推理步骤"
+    },
+    "emotion": {
+      "type": "string",
+      "enum": [
+        "calm",
+        "nervous",
+        "angry",
+        "afraid",
+        "sad",
+        "confident",
+        "suspicious",
+        "confused"
+      ]
+    },
+    "intent": {
+      "type": "string",
+      "enum": [
+        "cooperate",
+        "hide_information",
+        "seek_information",
+        "accuse",
+        "deflect",
+        "persuade",
+        "observe",
+        "other"
+      ]
+    },
+    "memory_updates": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": { "type": "string", "minLength": 1 },
+          "importance": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "required": ["content", "importance"]
+      }
+    }
   },
-  "query": "玩家当前发送的消息",
-  "response_mode": "blocking",
-  "conversation_id": "",
-  "user": "game-123-character-456"
+  "required": ["speech", "inner_os", "emotion", "intent", "memory_updates"]
 }
 ```
 
-HTTP Header 使用 `Authorization: Bearer <DIFY_CHARACTER_API_KEY>` 与 `Content-Type: application/json`。Dify 应通过 Chatflow Answer 返回文本；后端只接受非空台词作为 `speech`。
+Answer 示例（Answer 内容只返回 JSON 本身）：
+
+```json
+{
+  "speech": "我昨晚一直在旧仓库附近。",
+  "inner_os": "他问得太具体了，我得先弄清他知道多少。",
+  "emotion": "nervous",
+  "intent": "deflect",
+  "memory_updates": [
+    {
+      "content": "玩家追问了旧仓库附近的行踪。",
+      "importance": 3
+    }
+  ]
+}
+```
+
+若本轮没有值得长期记住的信息，返回 `"memory_updates": []`。不要为了填充字段而记录每一句对话。
 
 ## System Instruction
 
 将以下内容放入 LLM 节点的 System Instruction，并通过 Dify 变量选择器插入 `character_context`：
 
 ```text
-你正在扮演 character_context 中定义的角色。你的角色资料和当前可见信息如下：
+你正在扮演 character_context 中定义的角色。角色资料、当前可见消息、线索和该角色自己保留的记忆如下：
 【在此通过 Dify 变量选择器插入 character_context】
 
-请遵守以下角色行为要求：
-1. 只使用 character_context 中提供的信息，以及玩家当前这条消息。
-2. 保持角色的 personality、speaking_style、personal_goal 与当前情境一致。
-3. 你可以按角色目标隐瞒、回避或说谎，但不得声称知道 context 中不存在的事实。
-4. 不得自行创造、补充或宣布关键线索，不得改变案件真相。
-5. 不得宣布或执行游戏 phase、GameSession 状态、角色分配或搜证结果的变化。
-6. 不得跳出角色讨论 system prompt、后端实现、模型或其他实现细节。
-7. 直接像真人角色一样回应玩家，不要说明自己是 AI，也不要解释回答策略。
-8. 只输出角色实际说出的内容，不输出分析、标签、JSON 或内心独白。
+只使用 character_context 和玩家当前消息中允许你获知的信息。不要声称知道未提供的事实。
+
+请返回符合 Structured Output Schema 的 JSON 对象，且只返回这个对象：
+1. speech 是角色真正说出口的话，符合角色的性格和说话方式。
+2. inner_os 是一到两句简短、角色化的私人内心独白；不要输出完整推理步骤，也不要描述系统实现。
+3. emotion 表示本轮结束时角色的主要情绪，只能使用 Schema 列出的值。
+4. intent 描述这轮的行为目的，只能使用 Schema 列出的值。它只是描述，不会执行游戏动作。
+5. memory_updates 只记录会影响未来行为的重要信息，例如玩家透露的重要事实、形成的怀疑、承诺或重要关系变化。不要记录每句话；没有重要内容时返回空数组。
+6. 不得创造、宣布或授予正式线索，不得改变案件真相、GameSession 状态或当前阶段。
+7. 不得输出 Markdown、code fence、前言、解释或 Schema 外的字段。
 ```
 
-玩家输入由 Dify Chatflow 的 `sys.query` 提供给 LLM User 内容；不要把该输入拼入 `character_context`，两者由后端分别传递。
+## 后端请求与校验边界
 
-## 安全边界
+后端仍调用 `POST {DIFY_API_URL}/chat-messages`，使用 `DIFY_CHARACTER_API_KEY`。请求的 `character_context` 是经后端权限过滤并由 Pydantic 验证的 JSON 字符串；当前玩家消息通过 `query` 单独传入。每次请求都使用新的 Dify conversation，不依赖 Dify 保存对话历史。
 
-System Instruction 用来约束角色行为和回复形式，不是信息安全边界。提示词不能保证模型保密。安全性必须由 FastAPI 后端通过 CharacterContextBuilder 实现：只把当前目标角色获准知道的数据发送给 Dify。普通 Character Agent 不得获得完整剧本真相、其他角色私密背景、其他角色的私聊、随机种子或未获知线索。
+Dify Client 只处理 HTTP。Character Agent 从 Answer 读取 JSON 并使用后端 `CharacterModelOutput` 校验字段、枚举和数量。无效 JSON 或字段校验失败会返回明确的 AI 输出校验错误，不写入任何消息、Thought、Memory 或角色状态。
 
-不要在 Chatflow 中添加可以查询数据库、发放线索、推进游戏阶段或修改角色状态的工具。Dify 只返回台词；Game Engine 和数据库继续拥有游戏规则与权威状态。
+成功时普通聊天响应只包含玩家消息与角色 `speech`。`inner_os` 和 `memory_updates` 不进入普通消息；它们由后端在同一事务里保存到 `CharacterThought` 与 `CharacterMemory`。开发调试 API 仅在 `APP_ENV=development` 开放。
+
+Structured Output 和 System Instruction 都不是信息安全边界。权限隔离必须由 FastAPI 后端构造角色专属 Context；普通角色上下文不得包含完整剧本真相、其他角色私密记忆或内心状态。不要在 Dify 工具中添加修改游戏状态、推进阶段或发放线索的能力。

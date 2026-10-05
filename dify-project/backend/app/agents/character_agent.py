@@ -1,24 +1,41 @@
 """Character roleplay orchestration using only a validated safe context."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ValidationError
 
 from app.agents.dify_client import DifyClient
 from app.core.config import settings
+from app.schemas.ai import (
+    CharacterEmotion,
+    CharacterIntent,
+    CharacterModelOutput,
+    MemoryUpdate,
+)
 from app.schemas.context import CharacterContext
 
 
+class CharacterOutputValidationError(Exception):
+    """Raised when a Dify answer does not match the structured reply contract."""
+
+
 class CharacterReply(BaseModel):
-    """A character's spoken reply returned by its Chatflow."""
+    """Validated internal reply consumed by the game chat service."""
 
-    speech: str = Field(min_length=1)
+    speech: str
+    inner_os: str
+    emotion: CharacterEmotion
+    intent: CharacterIntent
+    memory_updates: list[MemoryUpdate]
 
-    @field_validator("speech")
-    @classmethod
-    def validate_speech(cls, speech: str) -> str:
-        """Reject blank replies before they can be persisted as messages."""
-        if not speech.strip():
-            raise ValueError("Character reply cannot be empty")
-        return speech
+
+def parse_character_reply(answer: str) -> CharacterReply:
+    """Parse Dify's raw JSON answer and reject any invalid character state."""
+    try:
+        model_output = CharacterModelOutput.model_validate_json(answer)
+    except ValidationError as error:
+        raise CharacterOutputValidationError(
+            "Dify returned invalid structured character output"
+        ) from error
+    return CharacterReply.model_validate(model_output.model_dump())
 
 
 class CharacterAgent:
@@ -39,7 +56,7 @@ class CharacterAgent:
             query=query,
             user_id=user_id,
         )
-        return CharacterReply(speech=answer)
+        return parse_character_reply(answer)
 
 
 def get_character_agent() -> CharacterAgent:

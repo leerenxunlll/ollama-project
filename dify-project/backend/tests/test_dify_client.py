@@ -101,6 +101,13 @@ def test_dify_timeout_and_connection_failures_are_classified(monkeypatch) -> Non
     with pytest.raises(DifyConnectionError):
         client.chat("{}", "query", "user")
 
+    monkeypatch.setattr(
+        "app.agents.dify_client.httpx.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad proxy")),
+    )
+    with pytest.raises(DifyConnectionError, match="check proxy settings"):
+        client.chat("{}", "query", "user")
+
 
 def test_dify_requires_url_and_key_without_requesting_network(monkeypatch) -> None:
     called = False

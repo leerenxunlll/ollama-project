@@ -19,7 +19,7 @@ flowchart LR
     Agents -->|角色对话推理与生成| Dify
 ```
 
-Phase 3 建立了固定剧情阶段、确定性游戏开始/推进、角色搜证与 public/private 消息 API。Phase 4 在此基础上增加一个同步的真人到 AI 角色私聊闭环；不改变 Game Engine 的确定性规则和既有信息边界。
+Phase 3 建立了固定剧情阶段、确定性游戏开始/推进、角色搜证与 public/private 消息 API。Phase 4 增加真人到单个 AI 角色的私聊闭环。Phase 5 为这条链路增加结构化角色状态与最小长期记忆；不改变 Game Engine 的确定性规则和权威信息边界。
 
 ## 职责边界
 
@@ -27,7 +27,7 @@ Phase 3 建立了固定剧情阶段、确定性游戏开始/推进、角色搜�
 - **FastAPI Backend** 提供 HTTP 接口，连接前端与服务端各层。
 - **Game Engine** 负责确定性游戏规则，是唯一可以校验并应用核心游戏状态变更的层。
 - **Game Engine** 负责校验角色选择状态，并锁定一个 human 与三个 ai 的确定性分配。
-- **Agent Layer** 负责 AI 推理与生成。Phase 4 的 Character Agent 只生成角色台词；AI 不允许直接修改核心游戏状态。
+- **Agent Layer** 负责 AI 推理与生成。Phase 5 的 Character Agent 返回经 Schema 验证的 speech、inner_os、emotion、intent 和 memory updates；AI 不允许直接修改核心游戏状态。
 - **Database** 使用 SQLite 持久化脚本模板与游戏运行数据。SQLAlchemy 模型表达真相；Alembic 负责后续表结构迁移，`create_all` 只创建缺失表。
 - **Dify** 由后端 Dify Client 调用，执行 Character Chatflow 并返回生成台词。Dify 不拥有权威游戏状态。
 
@@ -99,7 +99,7 @@ stateDiagram-v2
 
 ## AI Integration Boundary
 
-Phase 4 的单角色私聊链路为：
+当前单角色私聊链路为：
 
 ```mermaid
 flowchart LR
@@ -109,19 +109,36 @@ flowchart LR
     Builder -->|validated CharacterContext| Agent[CharacterAgent]
     Agent -->|safe context and current query| Client[DifyClient]
     Client -->|blocking chat-messages request| Dify[Dify Chatflow]
-    Dify -->|speech| Client
+    Dify -->|structured JSON answer| Client
     Client --> Agent
     Agent --> Service
-    Service -->|persist both private messages after success| DB[(SQLite)]
+    Service -->|atomic Message / Thought / Memory / emotion writes| DB[(SQLite)]
 ```
 
-`CharacterContextBuilder` 是唯一负责角色信息过滤的组件。CharacterAgent 接收经过 Pydantic 验证的 `CharacterContext` 和本轮玩家输入，不持有数据库 Session，不访问 ORM；DifyClient 只负责 HTTP、认证、超时和响应解析，不包含剧本或游戏规则。Dify 请求使用 `DIFY_API_URL` 与 `DIFY_CHARACTER_API_KEY`，配置状态由 `GET /api/ai/status` 提供；该接口只返回是否已配置，不返回密钥。`POST /api/games/{game_id}/ai-chat` 只支持玩家向同局一个 AI 角色私聊。
+`CharacterContextBuilder` 是唯一负责角色信息过滤的组件。CharacterAgent 接收经过 Pydantic 验证的 `CharacterContext` 和本轮玩家输入，不持有数据库 Session，不访问 ORM；DifyClient 只负责 HTTP、认证、超时和响应解析，不包含剧本或游戏规则。CharacterAgent 把 Dify Answer 解析为 `CharacterModelOutput` 并严格验证，再转换为内部 `CharacterReply`。Dify 请求使用 `DIFY_API_URL` 与 `DIFY_CHARACTER_API_KEY`，配置状态由 `GET /api/ai/status` 提供；该接口只返回是否已配置，不返回密钥。`POST /api/games/{game_id}/ai-chat` 只支持玩家向同局一个 AI 角色私聊。
 
-对话历史仍以 SQLite 中的 `Message` 为准。每次请求均使用新 Dify conversation（`conversation_id` 为空），不把 Dify conversation 当作游戏记忆或权威对话记录。CharacterContext 只包含该目标角色获准看到的消息与已知线索；当前玩家消息单独作为本轮 query 发送。
+对话历史仍以 SQLite 中的 `Message` 为准。每次请求均使用新 Dify conversation（`conversation_id` 为空），不把 Dify conversation 当作游戏记忆或权威对话记录。CharacterContext 只包含该目标角色获准看到的消息、已知线索和该角色自己的长期记忆；当前玩家消息单独作为本轮 query 发送。最近 20 条 public/system 与最近 20 条当前角色相关 private 消息进入 Context；Memory 最多 20 条，按 importance、created_at、ID 降序。历史 Thought 不自动进入 Context。
 
-消息事务顺序是：校验游戏与目标角色、构造安全 Context、调用 Dify、验证非空台词，最后在同一数据库事务中写入 Human 与 AI 两条 private Message。Dify 失败或返回无效台词时，两条消息都不写入；数据库写入失败时事务回滚，不留下半轮消息。AI 回复仅是消息文本，不会被当成阶段变化、线索授予或其他游戏状态命令。
+一轮的事务顺序是：校验游戏与目标角色、构造安全 Context、调用 Dify、验证整个结构化输出，然后在同一数据库事务中写入 Human Message、AI speech Message、CharacterThought、去重后的 CharacterMemory updates，并更新 `GameCharacter.current_emotion`。输出验证失败时不写入任何轮次数据；数据库写入失败时整轮回滚。`current_goal` 保持不变。AI intent 只是行为描述，不会触发 Game Engine 动作；AI 不会修改阶段、凶手身份、Script 真相或正式线索。
 
-Chatflow 的 System Instruction 用于维持角色行为，例如语气、目标和是否隐瞒角色已知秘密；它不是信息安全措施。信息安全来自 Context Builder 限制实际发送的数据，不能靠提示词要求模型保密。不得把 API Key、完整角色 Context 或角色秘密写入日志。
+Chatflow 的 Structured Output 和 System Instruction 用于生成稳定结构与角色行为；它们不是信息安全措施。信息安全来自 Context Builder 限制实际发送的数据，不能靠提示词要求模型保密。不得把 API Key、完整角色 Context 或角色秘密写入日志。
+
+## Character Cognitive State
+
+每轮角色对话中的四类数据各自有明确边界：
+
+| 数据 | 含义 | 权威性与可见范围 |
+| --- | --- | --- |
+| `Message` | 玩家发送的内容或角色实际说出口的 `speech` | 游戏对话记录；按 public/private channel 授权读取 |
+| `CharacterThought` | 某条 AI Message 对应的 `inner_os`、emotion、intent | 角色当轮私有演绎状态；普通消息、游戏状态与 Context 不返回 |
+| `CharacterMemory` | 某个 GameCharacter 在某局保留的主观信息 | 角色自己的长期主观认知；仅自己的后续 Context 可见，不等于真相 |
+| Game Truth | 当前阶段、凶手身份、Script 真相、线索规则等权威事实 | 由 Game Engine 与数据库确定；不由 AI 输出直接修改 |
+
+`CharacterMemory` 可以保存错误怀疑，例如“Alice 认为 Bob 可能是凶手”，即使 Bob 实际不是凶手。Game Engine 不得依据 Memory 自动裁定或修改真相。Memory 关联到单个 GameSession 和其中的 GameCharacter，同一个 Script 开启新局不会继承另一局的记忆。
+
+`CharacterThought.ai_message_id` 唯一，并通过复合外键保证 Thought、AI Message、GameCharacter 属于同一局且消息发送者就是该 GameCharacter。chat service 另外确认目标由 AI 控制，并以 private AI Message 保存回复。Memory 也通过复合外键约束所属 GameSession/角色与来源消息同局。
+
+普通 AI Chat 响应仅返回 Human Message 与 AI `speech` Message。开发专用 `GET /api/games/{game_id}/characters/{game_character_id}/thoughts` 聚合显示 AI Character 的 current emotion、最新 Thought 和最多 20 条 Memory，只在 `APP_ENV=development` 开放；Development 页面明确标记 **DEBUG ONLY**。这没有构成正式玩家的 OS Replay 功能。
 
 ## Character Context Pipeline
 
@@ -134,12 +151,14 @@ flowchart LR
     Agent --> Dify[Dify Chatflow]
 ```
 
-- Context Builder 位于 `backend/app/services/character_context.py`，只接收指定 `game_id` 和 `game_character_id`；Phase 4 CharacterAgent 仅使用这一安全 Context 与当前玩家消息生成角色台词。
+- Context Builder 位于 `backend/app/services/character_context.py`，只接收指定 `game_id` 和 `game_character_id`；CharacterAgent 仅使用这一安全 Context 与当前玩家消息生成结构化角色回复。
 - Builder 先确认运行角色属于该局，再构造明确的 Pydantic `CharacterContext`；它不会把 ORM 对象交给 Agent。
 - 当前角色可获得自己的私密背景、目标和运行状态；其他角色只含姓名、身份与公开背景。
 - 公共消息和 system 消息进入公共事件流；private 消息只在当前角色是发送者或接收者，且双方都属于该局时出现。
 - system 消息目前没有公开/私有子类型，因此本阶段约定所有 system 消息均为公开旁白。后续 Director 私有消息必须先扩展信息类型后才能保存，不能混入当前 system 流。
 - `known_clues` 仅读取 `GameCharacterClue` 中授予当前角色的线索，并校验线索仍属于该局 Script；同一剧本的其他线索不会自动进入上下文。
+- `memories` 仅读取当前 GameCharacter 在当前 GameSession 中的记录，最多 20 条并按 importance、时间、ID 降序；其他角色 Memory 与任何历史 `inner_os` 都不进入 Context。
+- `public_messages` 仅含最近 20 条 public/system 消息；`private_messages` 仅含最近 20 条当前角色发送或接收的 private 消息。两类消息都在 SQL 查询中限量，返回 Context 前按时间正序排列。
 - 调试路由只在 `APP_ENV=development` 暴露。角色 Context API 不属于普通游戏前端接口；Character Agent 不直接读取 ORM model，也不直接查询数据库。
 - `DirectorContext` 只定义未来 Director 可用的结构，不构造、不开放 API。当前没有完整案件真相字段；Context schema 也不虚构完整真相。
 

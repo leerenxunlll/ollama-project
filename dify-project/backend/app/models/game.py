@@ -7,6 +7,8 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -58,6 +60,12 @@ class GameSession(Base):
         back_populates="game_session"
     )
     messages: Mapped[list["Message"]] = relationship(back_populates="game_session")
+    character_thoughts: Mapped[list["CharacterThought"]] = relationship(
+        back_populates="game_session"
+    )
+    character_memories: Mapped[list["CharacterMemory"]] = relationship(
+        back_populates="game_session"
+    )
 
 
 class GameCharacter(Base):
@@ -67,6 +75,12 @@ class GameCharacter(Base):
     __table_args__ = (
         UniqueConstraint(
             "game_session_id", "character_id", name="uq_game_character_per_session"
+        ),
+        Index(
+            "uq_game_characters_session_id_id",
+            "game_session_id",
+            "id",
+            unique=True,
         ),
         CheckConstraint(
             "controller_type IS NULL OR controller_type IN ('human', 'ai')",
@@ -97,6 +111,14 @@ class GameCharacter(Base):
     )
     clue_discoveries: Mapped[list["GameCharacterClue"]] = relationship(
         back_populates="game_character"
+    )
+    thoughts: Mapped[list["CharacterThought"]] = relationship(
+        back_populates="game_character",
+        foreign_keys="CharacterThought.game_character_id",
+    )
+    memories: Mapped[list["CharacterMemory"]] = relationship(
+        back_populates="game_character",
+        foreign_keys="CharacterMemory.game_character_id",
     )
 
 
@@ -145,6 +167,19 @@ class Message(Base):
             "channel_type = 'system' OR sender_game_character_id IS NOT NULL",
             name="ck_messages_sender_by_channel",
         ),
+        Index(
+            "uq_messages_session_id_id",
+            "game_session_id",
+            "id",
+            unique=True,
+        ),
+        Index(
+            "uq_messages_session_id_id_sender",
+            "game_session_id",
+            "id",
+            "sender_game_character_id",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -173,4 +208,156 @@ class Message(Base):
     receiver_game_character: Mapped["GameCharacter | None"] = relationship(
         back_populates="received_messages",
         foreign_keys=[receiver_game_character_id],
+    )
+    character_thought: Mapped["CharacterThought | None"] = relationship(
+        back_populates="ai_message",
+        foreign_keys="CharacterThought.ai_message_id",
+        uselist=False,
+    )
+    memory_updates: Mapped[list["CharacterMemory"]] = relationship(
+        back_populates="source_message",
+        foreign_keys="CharacterMemory.source_message_id",
+    )
+
+
+class CharacterThought(Base):
+    """Private roleplay state produced alongside one AI message."""
+
+    __tablename__ = "character_thoughts"
+    __table_args__ = (
+        CheckConstraint(
+            "emotion IN ('calm', 'nervous', 'angry', 'afraid', 'sad', "
+            "'confident', 'suspicious', 'confused')",
+            name="ck_character_thoughts_emotion",
+        ),
+        CheckConstraint(
+            "intent IN ('cooperate', 'hide_information', 'seek_information', "
+            "'accuse', 'deflect', 'persuade', 'observe', 'other')",
+            name="ck_character_thoughts_intent",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_character_thoughts_game_character_session",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "ai_message_id", "game_character_id"],
+            [
+                "messages.game_session_id",
+                "messages.id",
+                "messages.sender_game_character_id",
+            ],
+            name="fk_character_thoughts_ai_message_sender",
+        ),
+        UniqueConstraint("ai_message_id", name="uq_character_thought_ai_message"),
+        Index(
+            "ix_character_thoughts_character_created",
+            "game_character_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "game_sessions.id",
+            name="fk_character_thoughts_game_session_id_game_sessions",
+        ),
+        nullable=False,
+    )
+    game_character_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "game_characters.id",
+            name="fk_character_thoughts_game_character_id_game_characters",
+        ),
+        nullable=False,
+    )
+    ai_message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id", name="fk_character_thoughts_ai_message_id_messages"),
+        nullable=False,
+    )
+    inner_os: Mapped[str] = mapped_column(Text, nullable=False)
+    emotion: Mapped[str] = mapped_column(String(20), nullable=False)
+    intent: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    game_session: Mapped["GameSession"] = relationship(
+        back_populates="character_thoughts"
+    )
+    game_character: Mapped["GameCharacter"] = relationship(
+        back_populates="thoughts", foreign_keys=[game_character_id]
+    )
+    ai_message: Mapped["Message"] = relationship(
+        back_populates="character_thought", foreign_keys=[ai_message_id]
+    )
+
+
+class CharacterMemory(Base):
+    """A subjective fact retained by one runtime character in one game."""
+
+    __tablename__ = "character_memories"
+    __table_args__ = (
+        CheckConstraint(
+            "importance BETWEEN 1 AND 5",
+            name="ck_character_memories_importance",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_character_memories_game_character_session",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "source_message_id"],
+            ["messages.game_session_id", "messages.id"],
+            name="fk_character_memories_source_message_session",
+        ),
+        Index(
+            "ix_character_memories_character_importance_created",
+            "game_character_id",
+            "importance",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "game_sessions.id",
+            name="fk_character_memories_game_session_id_game_sessions",
+        ),
+        nullable=False,
+    )
+    game_character_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "game_characters.id",
+            name="fk_character_memories_game_character_id_game_characters",
+        ),
+        nullable=False,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    importance: Mapped[int] = mapped_column(nullable=False)
+    source_message_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "messages.id", name="fk_character_memories_source_message_id_messages"
+        ),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    game_session: Mapped["GameSession"] = relationship(
+        back_populates="character_memories"
+    )
+    game_character: Mapped["GameCharacter"] = relationship(
+        back_populates="memories", foreign_keys=[game_character_id]
+    )
+    source_message: Mapped["Message"] = relationship(
+        back_populates="memory_updates", foreign_keys=[source_message_id]
     )

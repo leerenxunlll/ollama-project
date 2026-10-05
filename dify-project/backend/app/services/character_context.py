@@ -4,6 +4,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.models import (
+    CharacterMemory,
     Clue,
     GameCharacter,
     GameCharacterClue,
@@ -15,9 +16,13 @@ from app.schemas.context import (
     ContextCharacter,
     ContextClue,
     ContextGame,
+    ContextMemory,
     ContextMessage,
     ContextOtherCharacter,
 )
+
+MESSAGE_CONTEXT_LIMIT = 20
+MEMORY_CONTEXT_LIMIT = 20
 
 
 def build_character_context(
@@ -61,7 +66,7 @@ def build_character_context(
         sender_character.game_session_id == game_id,
         receiver_character.game_session_id == game_id,
     )
-    messages = list(
+    public_messages = list(
         db.scalars(
             select(Message)
             .outerjoin(
@@ -74,11 +79,33 @@ def build_character_context(
             )
             .where(
                 Message.game_session_id == game_id,
-                or_(visible_public_message, visible_private_message),
+                visible_public_message,
             )
-            .order_by(Message.created_at, Message.id)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(MESSAGE_CONTEXT_LIMIT)
         ).all()
     )
+    private_messages = list(
+        db.scalars(
+            select(Message)
+            .outerjoin(
+                sender_character,
+                sender_character.id == Message.sender_game_character_id,
+            )
+            .outerjoin(
+                receiver_character,
+                receiver_character.id == Message.receiver_game_character_id,
+            )
+            .where(
+                Message.game_session_id == game_id,
+                visible_private_message,
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(MESSAGE_CONTEXT_LIMIT)
+        ).all()
+    )
+    public_messages.reverse()
+    private_messages.reverse()
 
     clue_rows = db.execute(
         select(GameCharacterClue, Clue)
@@ -89,6 +116,21 @@ def build_character_context(
         )
         .order_by(GameCharacterClue.discovered_at, GameCharacterClue.id)
     ).all()
+    memories = list(
+        db.scalars(
+            select(CharacterMemory)
+            .where(
+                CharacterMemory.game_session_id == game_id,
+                CharacterMemory.game_character_id == current_character.id,
+            )
+            .order_by(
+                CharacterMemory.importance.desc(),
+                CharacterMemory.created_at.desc(),
+                CharacterMemory.id.desc(),
+            )
+            .limit(MEMORY_CONTEXT_LIMIT)
+        ).all()
+    )
 
     character_template = current_character.character
     return CharacterContext(
@@ -120,16 +162,8 @@ def build_character_context(
             for runtime_character in characters
             if runtime_character.id != current_character.id
         ],
-        public_messages=[
-            _context_message(message)
-            for message in messages
-            if message.channel_type in {"public", "system"}
-        ],
-        private_messages=[
-            _context_message(message)
-            for message in messages
-            if message.channel_type == "private"
-        ],
+        public_messages=[_context_message(message) for message in public_messages],
+        private_messages=[_context_message(message) for message in private_messages],
         known_clues=[
             ContextClue(
                 clue_id=clue.id,
@@ -143,6 +177,14 @@ def build_character_context(
                 source=discovery.source,
             )
             for discovery, clue in clue_rows
+        ],
+        memories=[
+            ContextMemory(
+                content=memory.content,
+                importance=memory.importance,
+                created_at=memory.created_at,
+            )
+            for memory in memories
         ],
     )
 

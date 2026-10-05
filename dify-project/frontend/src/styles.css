@@ -815,6 +815,77 @@ h1 em {
   margin-left: min(8vw, 80px);
 }
 
+.character-debug-inspector {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.character-debug-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.character-debug-heading h3 {
+  margin: 7px 0 0;
+  color: #e3ddd2;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.character-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.character-debug-grid > div,
+.character-debug-grid > article {
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 2%);
+  padding: 13px 14px;
+}
+
+.character-debug-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.character-debug-grid span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.character-debug-grid strong {
+  color: #d9c39f;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.character-debug-grid article p,
+.character-debug-grid article ul {
+  margin: 9px 0 0;
+  color: #d8d2c8;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.character-debug-grid article ul {
+  display: grid;
+  gap: 8px;
+  padding-left: 16px;
+}
+
+.character-debug-grid article li span {
+  display: inline-block;
+  margin-right: 8px;
+  color: #c7a475;
+}
+
 .dev-shell > .dev-message {
   width: min(100%, 1120px);
   margin-inline: auto;

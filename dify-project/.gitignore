@@ -13,6 +13,7 @@ __pycache__/
 *.tsbuildinfo
 node_modules/
 dist/
+frontend/test-results/
 coverage/
 *.egg-info/
 AGENTS.md

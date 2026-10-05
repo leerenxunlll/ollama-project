@@ -10,6 +10,7 @@ import {
   getGames,
   getInvestigationLocations,
   getMyCharacter,
+  getCharacterThoughts,
   getScripts,
   getSelectableCharacters,
   selectCharacter,
@@ -19,6 +20,7 @@ import {
   type AiChatResponse,
   type AiStatusResponse,
   type CharacterContext,
+  type CharacterDebugState,
   type GameResponse,
   type GameStateResponse,
   type InvestigationSearchResponse,
@@ -70,6 +72,10 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   )
   const [aiChatError, setAiChatError] = useState('')
   const [aiChatLoading, setAiChatLoading] = useState(false)
+  const [characterDebugState, setCharacterDebugState] =
+    useState<CharacterDebugState | null>(null)
+  const [characterDebugLoading, setCharacterDebugLoading] = useState(false)
+  const [characterDebugError, setCharacterDebugError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -116,6 +122,12 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   )
     ? aiTargetCharacterId
     : (aiCharacters[0]?.id ?? null)
+
+  const visibleCharacterDebugState =
+    characterDebugState?.game_id === aiChatGameId &&
+    characterDebugState?.game_character_id === selectedAiTargetId
+      ? characterDebugState
+      : null
 
   async function loadGameSession(gameId: number) {
     setGameError('')
@@ -286,19 +298,49 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     setAiChatLoading(true)
     setAiChatError('')
     setAiChatResponse(null)
+    setCharacterDebugError('')
     try {
-      setAiChatResponse(
-        await sendAiChat(
-          aiChatGameId,
-          selectedAiTargetId,
-          aiChatContent.trim(),
-        ),
+      const response = await sendAiChat(
+        aiChatGameId,
+        selectedAiTargetId,
+        aiChatContent.trim(),
       )
+      setAiChatResponse(response)
       setAiChatContent('')
+      setCharacterDebugLoading(true)
+      try {
+        setCharacterDebugState(
+          await getCharacterThoughts(aiChatGameId, selectedAiTargetId),
+        )
+      } catch (error) {
+        setCharacterDebugError(
+          error instanceof Error ? error.message : '读取角色私有状态失败',
+        )
+      } finally {
+        setCharacterDebugLoading(false)
+      }
     } catch (error) {
       setAiChatError(error instanceof Error ? error.message : 'AI 对话失败')
     } finally {
       setAiChatLoading(false)
+    }
+  }
+
+  async function handleLoadCharacterDebug() {
+    if (aiChatGameId === null || selectedAiTargetId === null) return
+
+    setCharacterDebugLoading(true)
+    setCharacterDebugError('')
+    try {
+      setCharacterDebugState(
+        await getCharacterThoughts(aiChatGameId, selectedAiTargetId),
+      )
+    } catch (error) {
+      setCharacterDebugError(
+        error instanceof Error ? error.message : '读取角色私有状态失败',
+      )
+    } finally {
+      setCharacterDebugLoading(false)
     }
   }
 
@@ -320,7 +362,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       <section className="dev-intro">
         <p className="eyebrow">
-          <span /> PHASE 04 / CHARACTER CHAT DEBUG
+          <span /> PHASE 05 / CHARACTER COGNITIVE STATE DEBUG
         </p>
         <h1>游戏规则与 AI 对话验证</h1>
         <p className="description">
@@ -735,6 +777,8 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
                   setAiTargetCharacterId(null)
                   setAiChatResponse(null)
                   setAiChatError('')
+                  setCharacterDebugState(null)
+                  setCharacterDebugError('')
                 }}
               >
                 <option value="">
@@ -763,6 +807,8 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
                   setAiTargetCharacterId(Number(event.target.value) || null)
                   setAiChatResponse(null)
                   setAiChatError('')
+                  setCharacterDebugState(null)
+                  setCharacterDebugError('')
                 }}
               >
                 {aiCharacters.length === 0 && (
@@ -831,12 +877,81 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             </article>
           </div>
         )}
+
+        <div className="character-debug-inspector">
+          <div className="character-debug-heading">
+            <div>
+              <p className="eyebrow">DEBUG ONLY</p>
+              <h3>AI Character State Inspector</h3>
+            </div>
+            <button
+              className="action-button"
+              type="button"
+              disabled={
+                aiChatGameId === null ||
+                selectedAiTargetId === null ||
+                characterDebugLoading
+              }
+              onClick={handleLoadCharacterDebug}
+            >
+              {characterDebugLoading ? '读取中…' : '读取角色状态'}
+            </button>
+          </div>
+          {characterDebugError && (
+            <p className="dev-message error-message" role="alert">
+              {characterDebugError}
+            </p>
+          )}
+          {visibleCharacterDebugState && (
+            <div className="character-debug-grid">
+              <div>
+                <span>当前情绪</span>
+                <strong>
+                  {visibleCharacterDebugState.current_emotion ?? '暂无'}
+                </strong>
+              </div>
+              <div>
+                <span>最新意图</span>
+                <strong>
+                  {visibleCharacterDebugState.latest_thought?.intent ?? '暂无'}
+                </strong>
+              </div>
+              <article>
+                <span>最新 inner_os</span>
+                <p>
+                  {visibleCharacterDebugState.latest_thought?.inner_os ??
+                    '尚无角色内心记录。'}
+                </p>
+              </article>
+              <article>
+                <span>长期记忆</span>
+                {visibleCharacterDebugState.memories.length === 0 ? (
+                  <p>尚无已保存记忆。</p>
+                ) : (
+                  <ul>
+                    {visibleCharacterDebugState.memories.map((memory) => (
+                      <li key={memory.id}>
+                        <span>重要度 {memory.importance}</span>
+                        {memory.content}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </article>
+            </div>
+          )}
+          {!visibleCharacterDebugState && !characterDebugLoading && (
+            <p className="debug-note">
+              这里仅用于开发检查；玩家正常对话只会看到角色 speech。
+            </p>
+          )}
+        </div>
       </section>
 
       <footer className="footer">
         <span>仅用于验证角色信息边界与 AI 对话链路</span>
         <span className="footer-mark">
-          PHASE 04 <i /> DEVELOPMENT DEBUG
+          PHASE 05 <i /> DEVELOPMENT DEBUG
         </span>
       </footer>
     </main>

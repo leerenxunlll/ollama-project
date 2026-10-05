@@ -1,6 +1,6 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前进入 **Phase 4：Dify 基础接入与单 Character Agent 私聊闭环**。本阶段只让真人玩家与一个指定 AI 角色完成一轮私聊，不启用多 Agent 协作、AI 主动发言或长期记忆。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前处于 **Phase 5：结构化角色回复、内心状态与最小长期记忆**。本阶段仍只支持真人与单个 AI 角色私聊，不启用多 Agent 协作或 AI 主动发言。
 
 ## Phase 3 已完成
 
@@ -14,9 +14,9 @@ AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本�
 
 Phase 3 增加 `finished` 生命周期状态，并将旧的 `introduction` 初始阶段迁移为 `intro`。升级已有数据库前先执行 Alembic migration；迁移保留旧 `completed` 状态及其他业务记录。`create_all` 仍只创建缺失表，不会升级旧表。
 
-## Phase 4 范围
+## Phase 4 已完成
 
-本阶段的 AI 调用链为：
+Phase 4 建立的 AI 调用链为：
 
 ```text
 Human Player → FastAPI Game Service → CharacterContextBuilder → CharacterAgent → DifyClient → Dify Chatflow
@@ -26,7 +26,22 @@ Human Player → FastAPI Game Service → CharacterContextBuilder → CharacterA
 
 Dify 只生成角色台词，不持有权威游戏状态或长期对话记忆。每轮调用以数据库中的授权消息和角色 Context 为依据；后端只在 Dify 返回有效台词后将玩家消息与 AI 回复作为一轮一起持久化。Dify 调用失败时不会留下半轮消息。未配置 Dify 时后端仍可启动，只有 AI 请求不可用。Chatflow 输入和 System Instruction 见 [Dify Character Chatflow 配置](docs/dify-character-chatflow.md)。
 
-Development / Debug 页面提供 AI Character Chat Debug，可查看配置状态、选择进行中的游戏和 AI 角色、发送一条私聊并查看玩家消息与角色回复。接口使用 `404` 表示游戏或目标不存在，`409` 表示游戏状态/角色不符合调用条件，`503` 表示 Dify 未配置，`504` 表示 Dify 超时，`502` 表示 Dify 连接、认证、上游请求或响应错误。
+Development / Debug 页面提供 AI Character Chat Debug，可查看配置状态、选择进行中的游戏和 AI 角色、发送一条私聊并查看玩家消息与角色回复。接口使用 `404` 表示游戏或目标不存在，`409` 表示游戏状态/角色不符合调用条件，`503` 表示 Dify 未配置，`504` 表示 Dify 超时，`502` 表示 Dify 连接、代理配置、认证、上游请求、响应或结构化输出校验错误。
+
+## Phase 5 范围
+
+Character Chatflow 现在需要返回经过校验的结构化输出：`speech`、`inner_os`、有限枚举 `emotion`、描述性 `intent` 和最多两条 `memory_updates`。后端只把 `speech` 返回给普通聊天界面；其余数据分别保存到 `CharacterThought` 和 `CharacterMemory`，并在同一数据库事务里保存 Human Message、AI Message 和 `GameCharacter.current_emotion`。`current_goal` 不由模型修改。
+
+```text
+Human Player → FastAPI → CharacterContextBuilder → CharacterAgent → Dify
+                    └─ validate → one database transaction → Message / Thought / Memory / emotion
+```
+
+每个 AI Character Context 只包含自己的 Memory，最多 20 条，按 importance、时间和 ID 倒序取值。历史消息分别限制为最近 20 条 public/system 与最近 20 条该角色相关 private 消息，并按时间正序提供。历史 Thought 不自动进入 Context。Memory 是角色主观认知，不是案件事实；AI 输出不能改游戏阶段、凶手身份、剧本真相或正式线索。
+
+新增的 `GET /api/games/{game_id}/characters/{game_character_id}/thoughts` 仅在 `APP_ENV=development` 开放，用于开发页的 **DEBUG ONLY** Inspector。普通消息、游戏状态和 AI Chat 响应不包含 `inner_os` 或 `memory_updates`。Chatflow JSON 契约及 System Instruction 见 [Dify Character Chatflow 配置](docs/dify-character-chatflow.md)。
+
+Phase 5 增加 Alembic migration `20261005_phase5`。升级现有数据库前先执行 `alembic -c backend/alembic.ini upgrade head`；不能依赖启动时的 `create_all` 更新旧表。
 
 ## 技术栈
 
@@ -35,7 +50,7 @@ Development / Debug 页面提供 AI Character Chat Debug，可查看配置状态
 | 前端 | React、TypeScript、Vite、原生 CSS |
 | 后端 | Python、FastAPI、Pydantic、SQLAlchemy 2.x |
 | 数据库 | SQLite |
-| AI 平台 | Dify Chatflow；本阶段仅用于单 AI 角色私聊 |
+| AI 平台 | Dify Chatflow；当前用于真人与单 AI 角色私聊 |
 
 ## 目录结构
 
@@ -87,7 +102,7 @@ cd ..
 
 ### 数据库迁移
 
-首次启动或升级 Phase 1 数据库前，在项目根目录执行：
+首次启动或升级已有数据库时，在项目根目录执行：
 
 ```bash
 alembic -c backend/alembic.ini upgrade head
@@ -131,14 +146,14 @@ npm run dev
 
 ### Real Dify smoke test
 
-只有在本地 `.env` 配置了真实 `DIFY_API_URL` 和 `DIFY_CHARACTER_API_KEY`，且 Dify Chatflow 已发布后才执行。启动 FastAPI 并准备一个状态为 `in_progress` 的游戏和一个 AI 角色，然后运行：
+在 Dify 中按 [Chatflow 配置说明](docs/dify-character-chatflow.md)启用 Structured Output 并重新发布后，再使用真实密钥验证。启动 FastAPI 并准备一个状态为 `in_progress` 的游戏和一个 AI 角色，然后运行：
 
 ```bash
 curl http://127.0.0.1:8000/api/ai/status
 curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: application/json' -d '{"target_game_character_id": 456, "content": "你昨晚在哪里？"}'
 ```
 
-将示例中的 `123` 和 `456` 替换为正在进行的游戏 ID 与该局 AI 角色 ID。第一条请求只检查 `configured`，第二条验证真人到 AI 角色的完整调用和消息持久化链。自动测试应使用 Mock Dify，不要求真实 API Key 或外网服务。不要把密钥复制到命令历史、终端输出或前端代码中。
+将示例中的 `123` 和 `456` 替换为正在进行的游戏 ID 与该局 AI 角色 ID。成功时普通响应只有玩家消息和角色 speech；在 Development 页面刷新 **DEBUG ONLY** Inspector，确认 emotion、inner_os、intent 与 memory 已保存，随后再次发送消息并检查角色 Context 中有其自己的记忆。自动测试使用 Mock Dify，不要求真实 API Key。不要把密钥复制到命令历史、终端输出或前端代码中。
 
 前端默认请求相对路径 `/api/...`。`frontend/vite.config.ts` 将开发环境的 `/api` 请求代理到 `VITE_API_PROXY_TARGET`（默认 `http://127.0.0.1:8000`），因此本地开发不需要额外 CORS 配置。需要指定 API origin 时，可设置 `VITE_API_BASE_URL`；不要把生产地址写进代码。
 
@@ -158,6 +173,7 @@ curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: appli
 | POST | `/api/games/{game_id}/select-character` | 选择真人角色并锁定角色分配 |
 | GET | `/api/games/{game_id}/me/character` | 读取本局唯一 human 的公开与本人私密角色卡 |
 | GET | `/api/games/{game_id}/characters/{game_character_id}/context` | Development 专用 Context 调试 |
+| GET | `/api/games/{game_id}/characters/{game_character_id}/thoughts` | Development 专用 Thought、emotion 与 Memory 调试 |
 | GET | `/api/ai/status` | 检查 Character Dify 配置是否可用，不返回密钥 |
 | POST | `/api/games/{game_id}/ai-chat` | 真人向本局一个 AI 角色发送私聊并保存完整消息轮次 |
 | POST | `/api/games/{game_id}/start` | 校验角色分配并开始游戏 |
@@ -166,7 +182,7 @@ curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: appli
 | POST | `/api/games/{game_id}/investigation/search` | 为本局角色确定性地授予一条新线索 |
 | POST | `/api/games/{game_id}/messages` | 创建 public/private 消息；system 消息仅由后端产生 |
 
-当前没有登录认证；`/me/character` 依据 GameSession 中唯一的 `human` 角色返回角色卡，因此不能替代真实用户身份校验。Context 调试 API 只在 `APP_ENV=development` 时可用。Development 页面中的游戏推进由开发者手动触发，没有 Director 自动推进。
+当前没有登录认证；`/me/character` 依据 GameSession 中唯一的 `human` 角色返回角色卡，因此不能替代真实用户身份校验。Context 和 Thought 调试 API 只在 `APP_ENV=development` 时可用。Development 页面中的游戏推进由开发者手动触发，没有 Director 自动推进。
 
 ### 测试与构建
 
@@ -177,6 +193,7 @@ cd backend
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest
 ruff check app tests migrations
 ruff format --check app tests migrations
+alembic -c alembic.ini check
 ```
 
 在另一个终端执行前端类型检查与构建：
@@ -184,14 +201,24 @@ ruff format --check app tests migrations
 ```bash
 cd frontend
 npm run build
+npm run format:check
 ```
 
-### Phase 3 Development 流程
+浏览器开发流程使用 Playwright CLI。先启动后端和 Vite，按“加载开发样例”创建一次固定 ready Script，然后在 `frontend/` 运行：
+
+```bash
+npm run test:e2e
+```
+
+测试会通过 API 创建临时游戏，再用浏览器打开 Development 页并读取空的 AI Character Inspector；它不会调用真实 Dify。
+
+### Development 流程
 
 1. 先按“加载开发样例”创建固定测试剧本。
 2. 在 Development 页创建游戏并选择一个真人角色。
 3. 点击 **Start Game**，再用 **Advance Phase** 推进到 `investigation_1`。
 4. 选择搜证地点并搜索；新线索只加入当前真人角色的已知线索。
-5. 点击“查看授权 Context”或在搜证后查看 JSON，确认 `known_clues` 更新。
+5. 点击“查看授权 Context”或在搜证后查看 JSON，确认 `known_clues` 与当前角色 `memories` 更新。
+6. 在 AI Character Chat Debug 中与一个 AI 角色交谈；Inspector 仅供开发调试，普通对话只显示 speech。
 
 客户端按钮只是开发辅助；开始、阶段推进和搜证权限由后端 Game Engine 再次校验。

@@ -5,6 +5,16 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.ai import CharacterEmotion
+
+
+class ContextMemory(BaseModel):
+    """One memory known only by the character receiving this context."""
+
+    content: str
+    importance: int
+    created_at: datetime
+
 
 class ContextGame(BaseModel):
     """Non-sensitive game fields visible in an agent context."""
@@ -26,7 +36,7 @@ class ContextCharacter(BaseModel):
     personality: str
     speaking_style: str
     personal_goal: str
-    current_emotion: str | None
+    current_emotion: CharacterEmotion | None
     current_goal: str | None
 
 
@@ -73,6 +83,7 @@ class CharacterContext(BaseModel):
     public_messages: list[ContextMessage]
     private_messages: list[ContextMessage]
     known_clues: list[ContextClue]
+    memories: list[ContextMemory]
 
 
 class DirectorCharacterContext(BaseModel):

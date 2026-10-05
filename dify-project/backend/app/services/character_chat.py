@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.agents.character_agent import CharacterAgent
 from app.game.state_machine import GameRuleError
-from app.models import GameCharacter, GameSession, Message
+from app.models import (
+    CharacterMemory,
+    CharacterThought,
+    GameCharacter,
+    GameSession,
+    Message,
+)
 from app.schemas.ai import AIChatRequest, AIChatResponse
 from app.schemas.game import MessageRead
 from app.services.character_context import build_character_context
@@ -91,8 +97,42 @@ def send_character_message(
         receiver_game_character_id=human_character.id,
         content=reply.speech,
     )
-    db.add_all([human_message, ai_message])
+    existing_memory_content = db.scalars(
+        select(CharacterMemory.content).where(
+            CharacterMemory.game_session_id == game_id,
+            CharacterMemory.game_character_id == target_character.id,
+        )
+    ).all()
+    seen_memories = {_normalize_memory(content) for content in existing_memory_content}
+
     try:
+        db.add_all([human_message, ai_message])
+        db.flush()
+        db.add(
+            CharacterThought(
+                game_session_id=game_id,
+                game_character_id=target_character.id,
+                ai_message_id=ai_message.id,
+                inner_os=reply.inner_os,
+                emotion=reply.emotion.value,
+                intent=reply.intent.value,
+            )
+        )
+        for update in reply.memory_updates:
+            normalized_content = _normalize_memory(update.content)
+            if normalized_content in seen_memories:
+                continue
+            db.add(
+                CharacterMemory(
+                    game_session_id=game_id,
+                    game_character_id=target_character.id,
+                    content=update.content,
+                    importance=update.importance,
+                    source_message_id=ai_message.id,
+                )
+            )
+            seen_memories.add(normalized_content)
+        target_character.current_emotion = reply.emotion.value
         db.commit()
     except Exception:
         db.rollback()
@@ -104,3 +144,8 @@ def send_character_message(
         human_message=MessageRead.model_validate(human_message),
         ai_message=MessageRead.model_validate(ai_message),
     )
+
+
+def _normalize_memory(content: str) -> str:
+    """Collapse whitespace for exact duplicate checks without semantic matching."""
+    return " ".join(content.split())

@@ -22,6 +22,45 @@ export interface AiChatResponse {
   ai_message: MessageRead
 }
 
+export type CharacterEmotion =
+  | 'calm'
+  | 'nervous'
+  | 'angry'
+  | 'afraid'
+  | 'sad'
+  | 'confident'
+  | 'suspicious'
+  | 'confused'
+
+export type CharacterIntent =
+  | 'cooperate'
+  | 'hide_information'
+  | 'seek_information'
+  | 'accuse'
+  | 'deflect'
+  | 'persuade'
+  | 'observe'
+  | 'other'
+
+export interface CharacterDebugState {
+  game_id: number
+  game_character_id: number
+  current_emotion: CharacterEmotion | null
+  latest_thought: {
+    inner_os: string
+    emotion: CharacterEmotion
+    intent: CharacterIntent
+    created_at: string
+  } | null
+  memories: Array<{
+    id: number
+    content: string
+    importance: number
+    source_message_id: number
+    created_at: string
+  }>
+}
+
 export interface ScriptSummary {
   id: number
   title: string
@@ -158,6 +197,11 @@ export interface CharacterContext {
     importance: number
     discovered_at: string
     source: string | null
+  }>
+  memories: Array<{
+    content: string
+    importance: number
+    created_at: string
   }>
 }
 
@@ -332,5 +376,14 @@ export function getCharacterContext(
 ): Promise<CharacterContext> {
   return requestJson(
     `/api/games/${gameId}/characters/${gameCharacterId}/context`,
+  )
+}
+
+export function getCharacterThoughts(
+  gameId: number,
+  gameCharacterId: number,
+): Promise<CharacterDebugState> {
+  return requestJson(
+    `/api/games/${gameId}/characters/${gameCharacterId}/thoughts`,
   )
 }
