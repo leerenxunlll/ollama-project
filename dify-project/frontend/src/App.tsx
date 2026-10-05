@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
 
 import { getHealth, type HealthResponse } from './api'
+import DevelopmentPage from './DevelopmentPage'
 
 type ConnectionState = 'loading' | 'success' | 'error'
+type PageName = 'home' | 'scripts'
 
 const entrances = [
-  { number: '01', title: '创建剧本', symbol: '✳' },
-  { number: '02', title: '载入剧本', symbol: '⌑' },
-  { number: '03', title: '进入游戏', symbol: '↗' },
+  { number: '01', title: '创建剧本', symbol: '✳', available: false },
+  { number: '02', title: '载入剧本', symbol: '⌑', available: true },
+  { number: '03', title: '进入游戏', symbol: '↗', available: false },
 ]
 
 function App() {
+  const [page, setPage] = useState<PageName>('home')
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('loading')
   const [health, setHealth] = useState<HealthResponse | null>(null)
@@ -31,6 +34,10 @@ function App() {
 
     return () => controller.abort()
   }, [])
+
+  if (page === 'scripts') {
+    return <DevelopmentPage onBack={() => setPage('home')} />
+  }
 
   const connectionCopy = {
     loading: { label: '正在连接后端', detail: '请稍候', icon: '◌' },
@@ -60,7 +67,7 @@ function App() {
           </span>
           <span>AI MURDER MYSTERY</span>
         </a>
-        <span className="phase-label">PHASE 00 <i /> SYSTEM PREVIEW</span>
+        <span className="phase-label">PHASE 01 <i /> DATA MODEL CHECK</span>
       </header>
 
       <section className="intro" id="home">
@@ -89,7 +96,13 @@ function App() {
 
       <section className="entrances" aria-label="功能入口">
         {entrances.map((entrance) => (
-          <button className="entrance-card" type="button" disabled key={entrance.number}>
+          <button
+            className="entrance-card"
+            type="button"
+            disabled={!entrance.available}
+            key={entrance.number}
+            onClick={() => setPage('scripts')}
+          >
             <span className="entrance-topline">
               <span>{entrance.number} / 03</span>
               <span className="entrance-symbol" aria-hidden="true">
@@ -97,7 +110,9 @@ function App() {
               </span>
             </span>
             <span className="entrance-title">{entrance.title}</span>
-            <span className="entrance-note">即将开放</span>
+            <span className="entrance-note">
+              {entrance.available ? '开发验证页' : '即将开放'}
+            </span>
           </button>
         ))}
       </section>

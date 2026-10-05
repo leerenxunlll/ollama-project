@@ -14,5 +14,6 @@ __pycache__/
 node_modules/
 dist/
 coverage/
+*.egg-info/
 AGENTS.md
 CLAUDE.md

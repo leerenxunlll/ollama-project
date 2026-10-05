@@ -1,1 +1,13 @@
-"""Future SQLAlchemy domain models; no business tables exist in Phase 0."""
+"""SQLAlchemy models for script templates and game runtime data."""
+
+from app.models.game import GameCharacter, GameSession, Message
+from app.models.script import Character, Clue, Script
+
+__all__ = [
+    "Character",
+    "Clue",
+    "GameCharacter",
+    "GameSession",
+    "Message",
+    "Script",
+]

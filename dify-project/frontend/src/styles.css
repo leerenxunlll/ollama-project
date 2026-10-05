@@ -333,6 +333,227 @@ h1 em {
   color: #858891;
 }
 
+.entrance-card:not(:disabled) {
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.entrance-card:not(:disabled):hover {
+  background: rgb(215 178 125 / 5%);
+}
+
+.dev-shell {
+  min-height: 100vh;
+}
+
+.back-link {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: #c7c8cb;
+  cursor: pointer;
+  padding: 9px 13px;
+  font-size: 11px;
+}
+
+.back-link:hover,
+.action-button:not(:disabled):hover {
+  border-color: rgb(215 178 125 / 55%);
+  color: #f0d4aa;
+}
+
+.dev-intro,
+.dev-grid {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1120px);
+  margin-inline: auto;
+}
+
+.dev-intro {
+  padding-block: 62px 34px;
+}
+
+.dev-intro h1 {
+  margin-block: 16px 8px;
+  font-size: clamp(36px, 5vw, 54px);
+}
+
+.dev-intro .description {
+  max-width: 600px;
+  margin-bottom: 0;
+}
+
+.dev-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 16px;
+}
+
+.dev-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 2%);
+  padding: 22px;
+  backdrop-filter: blur(12px);
+}
+
+.dev-panel-heading {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+}
+
+.dev-panel-heading .eyebrow {
+  margin: 0 0 7px;
+  font-size: 9px;
+}
+
+.dev-panel-heading h2 {
+  margin: 0;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.record-count,
+.status-tag,
+.controller-tag {
+  color: #8c8e96;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.dev-message {
+  margin: 18px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.error-message {
+  color: #d8897f;
+}
+
+.script-list {
+  display: grid;
+}
+
+.script-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0;
+}
+
+.script-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.script-copy {
+  min-width: 0;
+}
+
+.script-title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.script-title-line h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-ready {
+  color: #91bf9d;
+}
+
+.status-draft {
+  color: #c9a977;
+}
+
+.script-copy p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.action-button {
+  flex: 0 0 auto;
+  border: 1px solid rgb(215 178 125 / 34%);
+  background: rgb(215 178 125 / 7%);
+  color: #d8bd97;
+  cursor: pointer;
+  padding: 9px 12px;
+  font-size: 10px;
+}
+
+.action-button:disabled {
+  border-color: var(--line);
+  color: #666971;
+  cursor: not-allowed;
+}
+
+.session-meta {
+  display: flex;
+  gap: 22px;
+  padding-block: 18px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.session-meta strong {
+  margin-left: 6px;
+  color: #e2d4bf;
+  font-weight: 500;
+}
+
+.game-character-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.game-character-list li {
+  display: flex;
+  min-height: 49px;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.character-index {
+  color: #747780;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+}
+
+.character-name {
+  font-size: 12px;
+}
+
+.controller-tag {
+  margin-left: auto;
+}
+
+.controller-human {
+  color: #d5b27d;
+}
+
+.controller-ai {
+  color: #919cb3;
+}
+
 @keyframes rotate {
   to {
     transform: rotate(360deg);
@@ -353,6 +574,10 @@ h1 em {
 
   .connection-card {
     align-self: flex-start;
+  }
+
+  .dev-grid {
+    grid-template-columns: 1fr;
   }
 
   .entrance-card {
@@ -404,5 +629,22 @@ h1 em {
 
   .footer {
     gap: 12px;
+  }
+
+  .dev-intro {
+    padding-block: 44px 26px;
+  }
+
+  .dev-panel {
+    padding: 17px;
+  }
+
+  .script-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .action-button {
+    align-self: flex-start;
   }
 }
