@@ -10,3 +10,4 @@
 - [x] Phase 6：共用 Character Chatflow 的 `interaction_context` 模式及单条主动公开发言
 - [x] Phase 6：Development 公共房间、主动发言调试与 Thought / Memory Inspector
 - [x] Phase 6：验证公开回合与私聊各自的持久化和失败语义
+- [x] Phase 7：Game Flow、Vote、Director Context 与 Director Workflow（自动验证完成；真实 Dify smoke 待配置独立 Director Key）

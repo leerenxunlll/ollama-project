@@ -21,6 +21,7 @@ from app.schemas.game import (
     InvestigationResultRead,
     PlayerMessageCreate,
 )
+from app.services.game_flow import get_game_flow_state
 
 PHASE_MESSAGES = {
     "act_1": "进入第一幕。",
@@ -57,6 +58,7 @@ def start_game(db: Session, game_id: int) -> GameStateRead:
     game.status = "in_progress"
     game.current_phase = "intro"
     game.started_at = now
+    game.phase_started_at = now
     db.add(
         Message(
             game_session_id=game.id,
@@ -71,19 +73,34 @@ def start_game(db: Session, game_id: int) -> GameStateRead:
     return _state_response(game)
 
 
-def advance_game_phase(db: Session, game_id: int) -> GameStateRead:
-    """Move exactly one phase forward and finish on entry to ending."""
+def advance_game_phase(
+    db: Session,
+    game_id: int,
+    now: datetime | None = None,
+    *,
+    commit: bool = True,
+) -> GameStateRead:
+    """Validate flow timing, then move exactly one step along the phase graph."""
     game = _get_game(db, game_id)
     if game.status != "in_progress":
         raise GameRuleError("Only an in-progress game can advance")
 
+    transition_time = now or datetime.now(timezone.utc)
+    flow_state = get_game_flow_state(db, game_id, transition_time)
+    if not flow_state.minimum_time_satisfied:
+        raise GameRuleError("The current phase minimum duration has not elapsed")
+    if game.current_phase == "vote" and not flow_state.vote_progress.voting_complete:
+        raise GameRuleError(
+            "All game characters must vote before the phase can advance"
+        )
+
     target_phase = require_next_phase(game.current_phase)
     game.current_phase = target_phase
+    game.phase_started_at = transition_time
     content = PHASE_MESSAGES[target_phase]
     if target_phase == "ending":
-        now = datetime.now(timezone.utc)
         game.status = "finished"
-        game.ended_at = now
+        game.ended_at = transition_time
 
     db.add(
         Message(
@@ -94,8 +111,9 @@ def advance_game_phase(db: Session, game_id: int) -> GameStateRead:
             content=content,
         )
     )
-    db.commit()
-    db.refresh(game)
+    if commit:
+        db.commit()
+        db.refresh(game)
     return _state_response(game)
 
 

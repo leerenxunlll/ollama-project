@@ -929,6 +929,210 @@ h1 em {
   color: #c7a475;
 }
 
+.flow-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.flow-stat {
+  display: grid;
+  min-height: 76px;
+  align-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 2%);
+  padding: 12px 14px;
+}
+
+.flow-stat span,
+.flow-eligibility > span:first-child {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.flow-stat strong {
+  color: #e0d7c9;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.flow-eligibility {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.eligibility-tag {
+  border: 1px solid var(--line);
+  color: #7b7e86;
+  padding: 6px 8px;
+  font-size: 9px;
+}
+
+.eligibility-tag.is-allowed {
+  border-color: rgb(135 190 151 / 35%);
+  color: #91bf9d;
+}
+
+.vote-debug-panel {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.vote-debug-panel h3,
+.director-recommendation h3 {
+  margin: 7px 0 0;
+  color: #e3ddd2;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.vote-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.vote-controls .field-label {
+  margin-top: 0;
+}
+
+.vote-progress-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 13px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.vote-progress-line strong {
+  color: #d9c39f;
+  font-weight: 500;
+}
+
+.vote-tally-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vote-tally-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  color: #b8b8bb;
+  padding: 10px 12px;
+  font-size: 10px;
+}
+
+.vote-tally-row strong {
+  color: #d9c39f;
+  font-weight: 500;
+}
+
+.director-action-row,
+.director-apply-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.director-action-row {
+  margin-top: 14px;
+}
+
+.director-action-row .section-caption,
+.director-apply-row .debug-note {
+  margin-block: 0;
+}
+
+.director-recommendation {
+  margin-top: 18px;
+  border: 1px solid rgb(215 178 125 / 24%);
+  background: rgb(215 178 125 / 4%);
+  padding: 16px;
+}
+
+.director-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 18px 0;
+}
+
+.director-details > div {
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 11px;
+}
+
+.director-details dt {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.director-details dd {
+  margin: 0;
+  color: #e0d7c9;
+  font-size: 11px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.director-references dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.director-references dd span {
+  border: 1px solid var(--line);
+  color: #c8b18c;
+  padding: 4px 7px;
+  font-size: 9px;
+}
+
+.director-outcome {
+  margin-top: 14px;
+  border: 1px solid rgb(135 190 151 / 35%);
+  background: rgb(135 190 151 / 5%);
+  color: #91bf9d;
+  padding: 13px 14px;
+  font-size: 11px;
+}
+
+.director-outcome.outcome-rejected {
+  border-color: rgb(210 120 111 / 35%);
+  background: rgb(210 120 111 / 5%);
+  color: #d8897f;
+}
+
+.director-outcome.outcome-advisory {
+  border-color: rgb(215 178 125 / 35%);
+  background: rgb(215 178 125 / 5%);
+  color: #d8bd97;
+}
+
+.director-outcome p {
+  margin: 6px 0 0;
+  color: #d8d2c8;
+  line-height: 1.7;
+}
+
 .dev-shell > .dev-message {
   width: min(100%, 1120px);
   margin-inline: auto;
@@ -958,6 +1162,10 @@ h1 em {
 
   .dev-grid {
     grid-template-columns: 1fr;
+  }
+
+  .flow-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .game-action-row {
@@ -1027,11 +1235,24 @@ h1 em {
   .private-card-grid,
   .context-controls,
   .ai-chat-selectors,
-  .public-room-controls {
+  .public-room-controls,
+  .vote-controls,
+  .vote-tally-list,
+  .director-details {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-summary-grid {
     grid-template-columns: 1fr;
   }
 
   .ai-chat-submit-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .director-action-row,
+  .director-apply-row {
     align-items: flex-start;
     flex-direction: column;
   }

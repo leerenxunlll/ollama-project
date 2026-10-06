@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("DIFY_CHARACTER_API_KEY", "DIFY_API_KEY"),
     )
+    dify_director_api_key: str = ""
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
@@ -30,6 +31,11 @@ class Settings(BaseSettings):
     def dify_character_configured(self) -> bool:
         """Whether the character chat endpoint has the required Dify settings."""
         return bool(self.dify_api_url.strip() and self.dify_character_api_key.strip())
+
+    @property
+    def dify_director_configured(self) -> bool:
+        """Whether the Director workflow has its independent Dify API key."""
+        return bool(self.dify_api_url.strip() and self.dify_director_api_key.strip())
 
 
 settings = Settings()

@@ -134,6 +134,73 @@ export interface GameStateResponse {
   can_investigate: boolean
 }
 
+export interface GameFlowState {
+  game_id: number
+  status: GameStatus
+  current_phase: GamePhase
+  phase_started_at: string | null
+  elapsed_seconds: number
+  minimum_duration_seconds: number
+  remaining_seconds: number
+  minimum_time_satisfied: boolean
+  can_investigate: boolean
+  can_discuss: boolean
+  can_vote: boolean
+  can_advance: boolean
+  is_finished: boolean
+  vote_progress: {
+    votes_cast: number
+    total_voters: number
+    voting_complete: boolean
+  }
+}
+
+export interface VoteRead {
+  id: number
+  game_session_id: number
+  voter_game_character_id: number
+  target_game_character_id: number
+  created_at: string
+}
+
+export interface VoteResult {
+  game_id: number
+  vote_count_by_target: Record<number, number>
+  winner_game_character_id: number | null
+  is_tie: boolean
+  votes_cast: number
+  total_voters: number
+  voting_complete: boolean
+  submitted_voter_game_character_ids: number[]
+}
+
+export interface DirectorStatusResponse {
+  configured: boolean
+}
+
+export interface DirectorRecommendationRecord {
+  id: number
+  game_session_id: number
+  pace: string
+  narrative_risk: string
+  recommended_action: string
+  target_game_character_id: number | null
+  clue_id: number | null
+  public_message_id: number | null
+  reason: string
+  status: string
+  created_at: string
+  applied_at: string | null
+}
+
+export interface DirectorApplyResult {
+  recommendation_id: number
+  status: 'applied' | 'rejected' | 'advisory'
+  reason: string
+  public_message?: MessageRead
+  flow_state?: GameFlowState
+}
+
 export interface InvestigationLocationsResponse {
   game_id: number
   current_phase: GamePhase
@@ -351,6 +418,53 @@ export function getGame(gameId: number): Promise<GameResponse> {
 
 export function getGameState(gameId: number): Promise<GameStateResponse> {
   return requestJson(`/api/games/${gameId}/state`)
+}
+
+export function getGameFlow(gameId: number): Promise<GameFlowState> {
+  return requestJson(`/api/games/${gameId}/flow`)
+}
+
+export function submitGameVote(
+  gameId: number,
+  voterGameCharacterId: number,
+  targetGameCharacterId: number,
+): Promise<VoteRead> {
+  return requestJson(`/api/games/${gameId}/votes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      voter_game_character_id: voterGameCharacterId,
+      target_game_character_id: targetGameCharacterId,
+    }),
+  })
+}
+
+export function getGameVoteResult(gameId: number): Promise<VoteResult> {
+  return requestJson(`/api/games/${gameId}/votes/result`)
+}
+
+export function getDirectorStatus(
+  signal?: AbortSignal,
+): Promise<DirectorStatusResponse> {
+  return requestJson('/api/director/status', { signal })
+}
+
+export function analyzeGameSituation(
+  gameId: number,
+): Promise<DirectorRecommendationRecord> {
+  return requestJson(`/api/games/${gameId}/director/analyze`, {
+    method: 'POST',
+  })
+}
+
+export function applyDirectorRecommendation(
+  gameId: number,
+  recommendationId: number,
+): Promise<DirectorApplyResult> {
+  return requestJson(
+    `/api/games/${gameId}/director/recommendations/${recommendationId}/apply`,
+    { method: 'POST' },
+  )
 }
 
 export function startGame(gameId: number): Promise<GameStateResponse> {

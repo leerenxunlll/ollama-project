@@ -1,5 +1,7 @@
 """Focused tests for deterministic game phases, investigation, and messages."""
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -39,13 +41,38 @@ def _start_game(client, db_session: Session) -> tuple[dict, dict]:
     return game, response.json()
 
 
-def _advance_to(client, game_id: int, target_phase: str) -> dict:
+def _advance_to(client, db_session: Session, game_id: int, target_phase: str) -> dict:
     state = client.get(f"/api/games/{game_id}/state").json()
     while state["current_phase"] != target_phase:
-        response = client.post(f"/api/games/{game_id}/advance-phase")
+        response = _advance_one_phase(client, db_session, game_id)
         assert response.status_code == 200
         state = response.json()
     return state
+
+
+def _advance_one_phase(client, db_session: Session, game_id: int):
+    """Fast-forward test time while exercising the real one-step API."""
+    game = db_session.get(GameSession, game_id)
+    game.phase_started_at = datetime.now(timezone.utc) - timedelta(seconds=30)
+    db_session.commit()
+    if game.current_phase == "vote":
+        characters = db_session.scalars(
+            select(GameCharacter)
+            .where(GameCharacter.game_session_id == game_id)
+            .order_by(GameCharacter.id)
+        ).all()
+        for index, character in enumerate(characters):
+            vote = client.post(
+                f"/api/games/{game_id}/votes",
+                json={
+                    "voter_game_character_id": character.id,
+                    "target_game_character_id": characters[
+                        (index + 1) % len(characters)
+                    ].id,
+                },
+            )
+            assert vote.status_code == 201
+    return client.post(f"/api/games/{game_id}/advance-phase")
 
 
 def test_start_requires_ready_game_and_sets_initial_state(
@@ -106,7 +133,7 @@ def test_phases_advance_in_order_and_ending_finishes_game(
     visited_phases = [state["current_phase"]]
 
     while state["next_phase"] is not None:
-        response = client.post(f"/api/games/{game['id']}/advance-phase")
+        response = _advance_one_phase(client, db_session, game["id"])
         assert response.status_code == 200
         state = response.json()
         visited_phases.append(state["current_phase"])
@@ -138,9 +165,7 @@ def test_advance_requires_started_game_and_ignores_requested_target(
 
     game, _ = _start_game(client, db_session)
 
-    response = client.post(
-        f"/api/games/{game['id']}/advance-phase", json={"target_phase": "vote"}
-    )
+    response = _advance_one_phase(client, db_session, game["id"])
 
     assert response.status_code == 200
     assert response.json()["current_phase"] == "act_1"
@@ -171,7 +196,7 @@ def test_act_one_search_grants_clue_and_context_only_to_searching_character(
     _select_human(client, game)
     _start = client.post(f"/api/games/{game['id']}/start")
     assert _start.status_code == 200
-    _advance_to(client, game["id"], "investigation_1")
+    _advance_to(client, db_session, game["id"], "investigation_1")
     character_id = game["game_characters"][0]["id"]
     other_character_id = game["game_characters"][1]["id"]
 
@@ -259,7 +284,7 @@ def test_search_uses_highest_importance_then_lowest_id(
         ]
     )
     db_session.commit()
-    _advance_to(client, game["id"], "investigation_1")
+    _advance_to(client, db_session, game["id"], "investigation_1")
 
     response = client.post(
         f"/api/games/{game['id']}/investigation/search",
@@ -287,7 +312,7 @@ def test_act_two_search_only_grants_act_two_clues(client, db_session: Session) -
         )
     )
     db_session.commit()
-    _advance_to(client, game["id"], "investigation_2")
+    _advance_to(client, db_session, game["id"], "investigation_2")
 
     response = client.post(
         f"/api/games/{game['id']}/investigation/search",
@@ -314,7 +339,7 @@ def test_search_rejects_foreign_game_character_and_ignores_foreign_script_clue(
 ) -> None:
     game, _ = _start_game(client, db_session)
     other_game = _create_game(client, db_session)
-    _advance_to(client, game["id"], "investigation_1")
+    _advance_to(client, db_session, game["id"], "investigation_1")
     other_script = Script(
         title="另一份测试剧本",
         status="ready",

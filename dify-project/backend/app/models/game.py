@@ -51,6 +51,9 @@ class GameSession(Base):
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    phase_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     ended_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -65,6 +68,10 @@ class GameSession(Base):
     )
     character_memories: Mapped[list["CharacterMemory"]] = relationship(
         back_populates="game_session"
+    )
+    votes: Mapped[list["Vote"]] = relationship(back_populates="game_session")
+    director_recommendations: Mapped[list["DirectorRecommendationRecord"]] = (
+        relationship(back_populates="game_session")
     )
 
 
@@ -120,6 +127,14 @@ class GameCharacter(Base):
         back_populates="game_character",
         foreign_keys="CharacterMemory.game_character_id",
     )
+    votes_cast: Mapped[list["Vote"]] = relationship(
+        back_populates="voter_game_character",
+        foreign_keys="Vote.voter_game_character_id",
+    )
+    votes_received: Mapped[list["Vote"]] = relationship(
+        back_populates="target_game_character",
+        foreign_keys="Vote.target_game_character_id",
+    )
 
 
 class GameCharacterClue(Base):
@@ -146,6 +161,132 @@ class GameCharacterClue(Base):
         back_populates="clue_discoveries"
     )
     clue: Mapped["Clue"] = relationship(back_populates="game_character_clues")
+
+
+class Vote(Base):
+    """One final vote cast by a runtime character in a game session."""
+
+    __tablename__ = "votes"
+    __table_args__ = (
+        CheckConstraint(
+            "voter_game_character_id != target_game_character_id",
+            name="ck_vote_not_self",
+        ),
+        UniqueConstraint(
+            "game_session_id",
+            "voter_game_character_id",
+            name="uq_vote_per_game_character",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "voter_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_votes_voter_game_character_session",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "target_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_votes_target_game_character_session",
+        ),
+        Index("ix_votes_game_session_id", "game_session_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id", name="fk_votes_game_session_id"), nullable=False
+    )
+    voter_game_character_id: Mapped[int] = mapped_column(nullable=False)
+    target_game_character_id: Mapped[int] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    game_session: Mapped["GameSession"] = relationship(back_populates="votes")
+    voter_game_character: Mapped["GameCharacter"] = relationship(
+        back_populates="votes_cast",
+        foreign_keys=[game_session_id, voter_game_character_id],
+        overlaps="game_session,votes",
+    )
+    target_game_character: Mapped["GameCharacter"] = relationship(
+        back_populates="votes_received",
+        foreign_keys=[game_session_id, target_game_character_id],
+        overlaps="game_session,votes,voter_game_character",
+    )
+
+
+class DirectorRecommendationRecord(Base):
+    """A validated Director suggestion and its deterministic handling status."""
+
+    __tablename__ = "director_recommendations"
+    __table_args__ = (
+        CheckConstraint(
+            "pace IN ('on_track', 'stalled', 'rushed', 'off_track')",
+            name="ck_director_recommendations_pace",
+        ),
+        CheckConstraint(
+            "narrative_risk IN ('low', 'medium', 'high')",
+            name="ck_director_recommendations_narrative_risk",
+        ),
+        CheckConstraint(
+            "recommended_action IN ('no_action', 'request_ai_speaker', "
+            "'recommend_phase_advance', 'suggest_clue_hint', 'highlight_public_fact')",
+            name="ck_director_recommendations_action",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'applied', 'rejected', 'advisory')",
+            name="ck_director_recommendations_status",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "target_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_director_recommendations_target_session",
+        ),
+        Index(
+            "ix_director_recommendations_game_created",
+            "game_session_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "game_sessions.id",
+            name="fk_director_recommendations_game_session_id",
+        ),
+        nullable=False,
+    )
+    pace: Mapped[str] = mapped_column(String(20), nullable=False)
+    narrative_risk: Mapped[str] = mapped_column(String(20), nullable=False)
+    recommended_action: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_game_character_id: Mapped[int | None] = mapped_column(nullable=True)
+    clue_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clues.id", name="fk_director_recommendations_clue_id"),
+        nullable=True,
+    )
+    public_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", name="fk_director_recommendations_public_message_id"),
+        nullable=True,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    game_session: Mapped["GameSession"] = relationship(
+        back_populates="director_recommendations"
+    )
+    target_game_character: Mapped["GameCharacter | None"] = relationship(
+        foreign_keys=[game_session_id, target_game_character_id],
+        overlaps="game_session,director_recommendations",
+    )
 
 
 class Message(Base):

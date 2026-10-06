@@ -1,4 +1,4 @@
-"""Deterministic selection of AI characters that may speak next."""
+"""Schedule AI speakers deterministically for each public turn."""
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
@@ -50,6 +50,20 @@ def select_next_ai(
             return ordered[(index + 1) % len(ordered)]
 
     return ordered[0]
+
+
+def select_requested_proactive_speaker(
+    ai_speakers: Sequence[Speaker], game_character_id: int
+) -> Speaker | None:
+    """Accept one exact scheduled AI speaker without creating a follow-up chain."""
+    return next(
+        (
+            speaker
+            for speaker in _ordered_speakers(ai_speakers)
+            if speaker.game_character_id == game_character_id
+        ),
+        None,
+    )
 
 
 def select_initial_responders(

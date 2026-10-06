@@ -1,5 +1,7 @@
 """Tests for the single human-to-AI private chat flow."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +20,7 @@ from app.models import (
     Clue,
     GameCharacter,
     GameCharacterClue,
+    GameSession,
     Message,
 )
 from app.schemas.ai import CharacterEmotion, CharacterIntent, MemoryUpdate
@@ -101,6 +104,31 @@ def _install_agent(client, agent: FakeCharacterAgent) -> None:
     client.app.dependency_overrides[get_character_agent] = lambda: agent
 
 
+def _advance_one_phase(client, db_session: Session, game: dict):
+    """Advance test games without waiting for the development timer."""
+    session = db_session.get(GameSession, game["id"])
+    session.phase_started_at = datetime.now(timezone.utc) - timedelta(seconds=30)
+    db_session.commit()
+    if session.current_phase == "vote":
+        characters = db_session.scalars(
+            select(GameCharacter)
+            .where(GameCharacter.game_session_id == game["id"])
+            .order_by(GameCharacter.id)
+        ).all()
+        for index, character in enumerate(characters):
+            vote_response = client.post(
+                f"/api/games/{game['id']}/votes",
+                json={
+                    "voter_game_character_id": character.id,
+                    "target_game_character_id": characters[
+                        (index + 1) % len(characters)
+                    ].id,
+                },
+            )
+            assert vote_response.status_code == 201
+    return client.post(f"/api/games/{game['id']}/advance-phase")
+
+
 def test_ai_status_reports_configuration_without_exposing_key(
     client, monkeypatch
 ) -> None:
@@ -152,7 +180,7 @@ def test_waiting_ready_and_finished_games_reject_ai_chat(
 
     client.post(f"/api/games/{game['id']}/start")
     for _ in range(len(PHASE_SEQUENCE) - 1):
-        response = client.post(f"/api/games/{game['id']}/advance-phase")
+        response = _advance_one_phase(client, db_session, game)
         assert response.status_code == 200
     finished = client.post(f"/api/games/{game['id']}/ai-chat", json=payload)
     assert finished.status_code == 409

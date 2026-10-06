@@ -6,14 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.agents.character_agent import CharacterAgent
-from app.game.state_machine import GameRuleError
-from app.game.turn_manager import (
+from app.game.speaker_scheduler import (
     MAX_AI_RESPONSES_PER_HUMAN_TURN,
     Speaker,
     select_initial_responders,
     select_next_ai,
     select_reaction_responder,
+    select_requested_proactive_speaker,
 )
+from app.game.state_machine import GameRuleError
 from app.models import GameCharacter, GameSession, Message
 from app.schemas.ai import (
     AIProactiveStepResponse,
@@ -186,6 +187,35 @@ def run_proactive_step(
     if responder is None:
         raise GameRuleError("At least one AI character is required")
 
+    return run_proactive_speaker_step(db, game_id, responder.game_character_id, agent)
+
+
+def run_proactive_speaker_step(
+    db: Session,
+    game_id: int,
+    game_character_id: int,
+    agent: CharacterAgent,
+    *,
+    commit: bool = True,
+) -> AIProactiveStepResponse:
+    """Request one specific eligible AI speaker without starting a response chain."""
+    game = db.get(GameSession, game_id)
+    if game is None:
+        raise LookupError("Game not found")
+    if game.status != "in_progress":
+        raise GameRuleError("AI step requires an in-progress game")
+
+    ai_characters = [
+        character
+        for character in _load_game_characters(db, game_id)
+        if character.controller_type == "ai"
+    ]
+    responder = select_requested_proactive_speaker(
+        _speakers(ai_characters), game_character_id
+    )
+    if responder is None:
+        raise GameRuleError("Requested speaker is not an AI character in this game")
+
     runtime_character = next(
         character
         for character in ai_characters
@@ -206,7 +236,7 @@ def run_proactive_step(
         receiver_game_character_id=None,
         content=reply.speech,
     )
-    persist_character_reply(db, runtime_character, ai_message, reply)
+    persist_character_reply(db, runtime_character, ai_message, reply, commit=commit)
     return AIProactiveStepResponse(ai_message=MessageRead.model_validate(ai_message))
 
 

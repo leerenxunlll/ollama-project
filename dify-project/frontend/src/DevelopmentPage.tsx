@@ -1,37 +1,48 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
 import {
-  createGame,
   advanceGamePhase,
-  getCharacterContext,
+  analyzeGameSituation,
+  applyDirectorRecommendation,
+  createGame,
   getAiStatus,
+  getCharacterContext,
+  getCharacterThoughts,
+  getDirectorStatus,
   getGame,
-  getGameState,
+  getGameFlow,
   getGames,
+  getGameState,
+  getGameVoteResult,
   getInvestigationLocations,
   getMyCharacter,
-  getCharacterThoughts,
   getPublicMessages,
   getScripts,
   getSelectableCharacters,
-  selectCharacter,
-  searchInvestigationLocation,
   requestAiStep,
+  searchInvestigationLocation,
+  selectCharacter,
   sendAiChat,
   sendPublicTurn,
   startGame,
-  type MessageRead,
+  submitGameVote,
   type AiChatResponse,
   type AiStatusResponse,
-  type PublicTurnResponse,
   type CharacterContext,
   type CharacterDebugState,
+  type DirectorApplyResult,
+  type DirectorRecommendationRecord,
+  type DirectorStatusResponse,
+  type GameFlowState,
   type GameResponse,
   type GameStateResponse,
   type InvestigationSearchResponse,
+  type MessageRead,
   type MyCharacterCard,
+  type PublicTurnResponse,
   type ScriptSummary,
   type SelectableCharacter,
+  type VoteResult,
 } from './api'
 
 interface DevelopmentPageProps {
@@ -87,6 +98,31 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   const [publicRoomLoading, setPublicRoomLoading] = useState('')
   const [publicTurnResult, setPublicTurnResult] =
     useState<PublicTurnResponse | null>(null)
+  const [gameFlow, setGameFlow] = useState<GameFlowState | null>(null)
+  const [gameFlowError, setGameFlowError] = useState('')
+  const [gameFlowLoading, setGameFlowLoading] = useState(false)
+  const [gameFlowUpdatedAt, setGameFlowUpdatedAt] = useState(0)
+  const [flowClock, setFlowClock] = useState(Date.now())
+  const [voteResult, setVoteResult] = useState<VoteResult | null>(null)
+  const [voteError, setVoteError] = useState('')
+  const [voteLoading, setVoteLoading] = useState(false)
+  const [voteSubmitting, setVoteSubmitting] = useState(false)
+  const [voteMessage, setVoteMessage] = useState('')
+  const [voterGameCharacterId, setVoterGameCharacterId] = useState<
+    number | null
+  >(null)
+  const [targetGameCharacterId, setTargetGameCharacterId] = useState<
+    number | null
+  >(null)
+  const [directorStatus, setDirectorStatus] =
+    useState<DirectorStatusResponse | null>(null)
+  const [directorStatusError, setDirectorStatusError] = useState('')
+  const [directorRecommendation, setDirectorRecommendation] =
+    useState<DirectorRecommendationRecord | null>(null)
+  const [directorOutcome, setDirectorOutcome] =
+    useState<DirectorApplyResult | null>(null)
+  const [directorError, setDirectorError] = useState('')
+  const [directorLoading, setDirectorLoading] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -119,6 +155,18 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
         }
       })
 
+    getDirectorStatus(controller.signal)
+      .then((status) => setDirectorStatus(status))
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setDirectorStatusError(
+            error instanceof Error
+              ? error.message
+              : '读取 Director 配置状态失败',
+          )
+        }
+      })
+
     return () => controller.abort()
   }, [])
 
@@ -146,6 +194,87 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     }
   }, [aiChatGameId])
 
+  useEffect(() => {
+    if (selectedGameId === null) {
+      setGameFlow(null)
+      setVoteResult(null)
+      return
+    }
+
+    let active = true
+    const gameId = selectedGameId
+    setGameFlow(null)
+    setGameFlowError('')
+    setGameFlowLoading(true)
+    setVoteResult(null)
+    setVoteError('')
+    setVoteLoading(true)
+    setVoteMessage('')
+    setDirectorRecommendation(null)
+    setDirectorOutcome(null)
+    setDirectorError('')
+
+    async function refreshFlow() {
+      try {
+        const loadedFlow = await getGameFlow(gameId)
+        if (active) {
+          setGameFlow(loadedFlow)
+          setGameFlowUpdatedAt(Date.now())
+          setGameFlowError('')
+        }
+      } catch (error) {
+        if (active) {
+          setGameFlowError(
+            error instanceof Error ? error.message : '读取游戏流程失败',
+          )
+        }
+      } finally {
+        if (active) setGameFlowLoading(false)
+      }
+    }
+
+    async function refreshVotes() {
+      try {
+        const loadedResult = await getGameVoteResult(gameId)
+        if (active) {
+          setVoteResult(loadedResult)
+          setVoteError('')
+        }
+      } catch (error) {
+        if (active) {
+          setVoteError(
+            error instanceof Error ? error.message : '读取投票统计失败',
+          )
+        }
+      } finally {
+        if (active) setVoteLoading(false)
+      }
+    }
+
+    void refreshFlow()
+    void refreshVotes()
+    const intervalId = window.setInterval(() => {
+      void refreshFlow()
+    }, 5000)
+
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [selectedGameId])
+
+  useEffect(() => {
+    if (selectedGameId === null) return undefined
+    const intervalId = window.setInterval(() => setFlowClock(Date.now()), 1000)
+    return () => window.clearInterval(intervalId)
+  }, [selectedGameId])
+
+  useEffect(() => {
+    const characters = game?.id === selectedGameId ? game.game_characters : []
+    setVoterGameCharacterId(characters[0]?.id ?? null)
+    setTargetGameCharacterId(characters[1]?.id ?? characters[0]?.id ?? null)
+  }, [game?.id, selectedGameId])
+
   const inProgressGames = games.filter((item) => item.status === 'in_progress')
   const aiChatGame = inProgressGames.find((item) => item.id === aiChatGameId)
   const aiCharacters =
@@ -163,6 +292,144 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     characterDebugState?.game_character_id === selectedAiTargetId
       ? characterDebugState
       : null
+  const selectedGame = game?.id === selectedGameId ? game : null
+  const currentGameFlow = gameFlow?.game_id === selectedGameId ? gameFlow : null
+  const flowElapsedSeconds = currentGameFlow
+    ? currentGameFlow.elapsed_seconds +
+      Math.max(0, Math.floor((flowClock - gameFlowUpdatedAt) / 1000))
+    : 0
+  const flowRemainingSeconds = currentGameFlow
+    ? Math.max(
+        0,
+        currentGameFlow.remaining_seconds -
+          Math.max(0, Math.floor((flowClock - gameFlowUpdatedAt) / 1000)),
+      )
+    : 0
+  const selectedVoterGameCharacterId = selectedGame?.game_characters.some(
+    (character) => character.id === voterGameCharacterId,
+  )
+    ? voterGameCharacterId
+    : (selectedGame?.game_characters[0]?.id ?? null)
+  const selectedTargetGameCharacterId = selectedGame?.game_characters.some(
+    (character) => character.id === targetGameCharacterId,
+  )
+    ? targetGameCharacterId
+    : (selectedGame?.game_characters[1]?.id ??
+      selectedGame?.game_characters[0]?.id ??
+      null)
+
+  function formatDuration(totalSeconds: number): string {
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${minutes}:${String(seconds).padStart(2, '0')}`
+  }
+
+  async function handleRefreshGameFlow() {
+    if (selectedGameId === null) return
+    setGameFlowLoading(true)
+    setGameFlowError('')
+    try {
+      setGameFlow(await getGameFlow(selectedGameId))
+      setGameFlowUpdatedAt(Date.now())
+    } catch (error) {
+      setGameFlowError(
+        error instanceof Error ? error.message : '读取游戏流程失败',
+      )
+    } finally {
+      setGameFlowLoading(false)
+    }
+  }
+
+  async function handleRefreshVoteTally() {
+    if (selectedGameId === null) return
+    setVoteLoading(true)
+    setVoteError('')
+    try {
+      setVoteResult(await getGameVoteResult(selectedGameId))
+    } catch (error) {
+      setVoteError(error instanceof Error ? error.message : '读取投票统计失败')
+    } finally {
+      setVoteLoading(false)
+    }
+  }
+
+  async function handleSubmitDebugVote() {
+    if (
+      selectedGameId === null ||
+      selectedVoterGameCharacterId === null ||
+      selectedTargetGameCharacterId === null
+    ) {
+      return
+    }
+
+    setVoteSubmitting(true)
+    setVoteError('')
+    setVoteMessage('')
+    try {
+      await submitGameVote(
+        selectedGameId,
+        selectedVoterGameCharacterId,
+        selectedTargetGameCharacterId,
+      )
+      setVoteMessage('测试投票已提交。')
+      await handleRefreshVoteTally()
+    } catch (error) {
+      setVoteError(error instanceof Error ? error.message : '提交投票失败')
+    } finally {
+      setVoteSubmitting(false)
+    }
+  }
+
+  async function handleAnalyzeDirectorSituation() {
+    if (selectedGameId === null) return
+    setDirectorLoading('analyze')
+    setDirectorError('')
+    setDirectorOutcome(null)
+    try {
+      setDirectorRecommendation(await analyzeGameSituation(selectedGameId))
+    } catch (error) {
+      setDirectorError(
+        error instanceof Error ? error.message : 'Director 分析失败',
+      )
+    } finally {
+      setDirectorLoading('')
+    }
+  }
+
+  async function handleApplyDirectorRecommendation() {
+    if (selectedGameId === null || directorRecommendation === null) return
+    setDirectorLoading('apply')
+    setDirectorError('')
+    try {
+      const outcome = await applyDirectorRecommendation(
+        selectedGameId,
+        directorRecommendation.id,
+      )
+      setDirectorOutcome(outcome)
+      setDirectorRecommendation((current) =>
+        current === null
+          ? null
+          : {
+              ...current,
+              status: outcome.status,
+              applied_at:
+                outcome.status === 'applied'
+                  ? new Date().toISOString()
+                  : current.applied_at,
+            },
+      )
+      if (outcome.flow_state) {
+        setGameFlow(outcome.flow_state)
+        setGameFlowUpdatedAt(Date.now())
+      }
+    } catch (error) {
+      setDirectorError(
+        error instanceof Error ? error.message : '应用 Director 建议失败',
+      )
+    } finally {
+      setDirectorLoading('')
+    }
+  }
 
   async function loadGameSession(gameId: number) {
     setGameError('')
@@ -441,12 +708,10 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       <section className="dev-intro">
         <p className="eyebrow">
-          <span /> PHASE 06 / MULTI-AGENT PUBLIC ROOM DEBUG
+          <span /> PHASE 07 / GAME FLOW & DIRECTOR DEBUG
         </p>
         <h1>游戏规则与 AI 对话验证</h1>
-        <p className="description">
-          验证公共回合中真人发言与多个 AI 角色的公开回应。
-        </p>
+        <p className="description">验证阶段计时、投票统计与导演建议应用。</p>
       </section>
 
       {listError && (
@@ -715,6 +980,390 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             </div>
           )}
         </div>
+      </section>
+
+      <section
+        className="dev-panel detail-panel"
+        aria-label="游戏流程与投票开发调试"
+      >
+        <div className="dev-panel-heading">
+          <div>
+            <p className="eyebrow">DEBUG ONLY · GAME FLOW</p>
+            <h2>阶段计时与动作资格</h2>
+          </div>
+          <button
+            className="action-button"
+            type="button"
+            disabled={selectedGameId === null || gameFlowLoading}
+            onClick={handleRefreshGameFlow}
+          >
+            {gameFlowLoading ? '刷新中…' : '刷新流程状态'}
+          </button>
+        </div>
+
+        {gameFlowError && (
+          <p className="dev-message error-message" role="alert">
+            {gameFlowError}
+          </p>
+        )}
+        {!selectedGame && (
+          <p className="dev-message">请先在上方选择一局 GameSession。</p>
+        )}
+        {selectedGame && !currentGameFlow && !gameFlowError && (
+          <p className="dev-message">
+            {gameFlowLoading ? '正在读取流程状态…' : '暂无流程状态。'}
+          </p>
+        )}
+        {selectedGame && currentGameFlow && (
+          <>
+            <div className="flow-summary-grid">
+              <div className="flow-stat">
+                <span>当前阶段</span>
+                <strong>{currentGameFlow.current_phase}</strong>
+              </div>
+              <div className="flow-stat">
+                <span>阶段已用时间</span>
+                <strong>{formatDuration(flowElapsedSeconds)}</strong>
+              </div>
+              <div className="flow-stat">
+                <span>最低时长剩余</span>
+                <strong>{formatDuration(flowRemainingSeconds)}</strong>
+              </div>
+              <div className="flow-stat">
+                <span>阶段状态</span>
+                <strong>
+                  {currentGameFlow.minimum_time_satisfied
+                    ? '已满足最低时长'
+                    : `最低 ${formatDuration(currentGameFlow.minimum_duration_seconds)}`}
+                </strong>
+              </div>
+            </div>
+
+            <div className="flow-eligibility" aria-label="当前动作资格">
+              <span>动作资格</span>
+              {[
+                ['搜证', currentGameFlow.can_investigate],
+                ['讨论', currentGameFlow.can_discuss],
+                ['投票', currentGameFlow.can_vote],
+                ['推进阶段', currentGameFlow.can_advance],
+                ['游戏结束', currentGameFlow.is_finished],
+              ].map(([label, available]) => (
+                <span
+                  className={`eligibility-tag ${available ? 'is-allowed' : ''}`}
+                  key={label as string}
+                >
+                  {label as string} · {available ? '允许' : '不可用'}
+                </span>
+              ))}
+            </div>
+
+            {currentGameFlow.phase_started_at && (
+              <p className="debug-note">
+                阶段开始时间：
+                {new Date(currentGameFlow.phase_started_at).toLocaleString()}
+              </p>
+            )}
+
+            <div className="vote-debug-panel">
+              <div className="character-debug-heading">
+                <div>
+                  <p className="eyebrow">DEVELOPMENT VOTE DEBUG</p>
+                  <h3>投票提交流程</h3>
+                </div>
+                <button
+                  className="action-button"
+                  type="button"
+                  disabled={voteLoading}
+                  onClick={handleRefreshVoteTally}
+                >
+                  {voteLoading ? '刷新中…' : '刷新统计'}
+                </button>
+              </div>
+
+              <div className="vote-controls">
+                <div>
+                  <label className="field-label" htmlFor="debug-voter-select">
+                    投票人（本局任意角色）
+                  </label>
+                  <select
+                    className="dev-select"
+                    id="debug-voter-select"
+                    value={selectedVoterGameCharacterId ?? ''}
+                    onChange={(event) =>
+                      setVoterGameCharacterId(
+                        Number(event.target.value) || null,
+                      )
+                    }
+                  >
+                    {selectedGame.game_characters.map((character) => (
+                      <option key={character.id} value={character.id}>
+                        {character.character.name} · #{character.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label" htmlFor="debug-target-select">
+                    投票目标
+                  </label>
+                  <select
+                    className="dev-select"
+                    id="debug-target-select"
+                    value={selectedTargetGameCharacterId ?? ''}
+                    onChange={(event) =>
+                      setTargetGameCharacterId(
+                        Number(event.target.value) || null,
+                      )
+                    }
+                  >
+                    {selectedGame.game_characters.map((character) => (
+                      <option key={character.id} value={character.id}>
+                        {character.character.name} · #{character.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  className="action-button"
+                  type="button"
+                  disabled={
+                    !currentGameFlow.can_vote ||
+                    selectedVoterGameCharacterId === null ||
+                    selectedTargetGameCharacterId === null ||
+                    voteSubmitting ||
+                    voteResult?.submitted_voter_game_character_ids.includes(
+                      selectedVoterGameCharacterId ?? -1,
+                    ) === true
+                  }
+                  onClick={handleSubmitDebugVote}
+                >
+                  {voteSubmitting ? '提交中…' : '提交测试投票'}
+                </button>
+              </div>
+
+              <div className="vote-progress-line">
+                <span>
+                  当前进度：
+                  {voteResult?.votes_cast ??
+                    currentGameFlow.vote_progress.votes_cast}{' '}
+                  /{' '}
+                  {voteResult?.total_voters ??
+                    currentGameFlow.vote_progress.total_voters}{' '}
+                  票
+                </span>
+                <strong>
+                  {(voteResult?.voting_complete ??
+                  currentGameFlow.vote_progress.voting_complete)
+                    ? '投票完成'
+                    : '投票进行中'}
+                </strong>
+              </div>
+              {voteMessage && (
+                <p className="dev-message" role="status">
+                  {voteMessage}
+                </p>
+              )}
+              {voteError && (
+                <p className="dev-message error-message" role="alert">
+                  {voteError}
+                </p>
+              )}
+              <div className="vote-tally-list" aria-label="按目标统计票数">
+                {selectedGame.game_characters.map((character) => (
+                  <div className="vote-tally-row" key={character.id}>
+                    <span>
+                      {character.character.name} · #{character.id}
+                    </span>
+                    <strong>
+                      {voteResult?.vote_count_by_target[character.id] ?? 0} 票
+                    </strong>
+                  </div>
+                ))}
+              </div>
+              {voteResult && voteResult.is_tie && (
+                <p className="debug-note">当前票数并列。</p>
+              )}
+              {voteResult?.winner_game_character_id !== null &&
+                voteResult?.winner_game_character_id !== undefined && (
+                  <p className="debug-note">
+                    当前最高票角色：
+                    {selectedGame.game_characters.find(
+                      (character) =>
+                        character.id === voteResult.winner_game_character_id,
+                    )?.character.name ??
+                      `角色 #${voteResult.winner_game_character_id}`}
+                  </p>
+                )}
+              {!currentGameFlow.can_vote && (
+                <p className="debug-note">
+                  当前阶段不允许投票；仍可查看投票进度与统计。
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section
+        className="dev-panel detail-panel"
+        aria-label="Director 开发调试"
+      >
+        <div className="dev-panel-heading">
+          <div>
+            <p className="eyebrow">DEBUG ONLY · DIRECTOR</p>
+            <h2>导演建议调试</h2>
+          </div>
+          <span
+            className={`ai-status-pill ${
+              directorStatusError
+                ? 'is-error'
+                : directorStatus === null
+                  ? 'is-loading'
+                  : directorStatus.configured
+                    ? 'is-ready'
+                    : 'is-disabled'
+            }`}
+            role="status"
+          >
+            {directorStatusError
+              ? '状态读取失败'
+              : directorStatus === null
+                ? '正在检查配置…'
+                : directorStatus.configured
+                  ? 'Director 已配置'
+                  : 'Director 未配置'}
+          </span>
+        </div>
+        {directorStatusError && (
+          <p className="dev-message error-message" role="alert">
+            {directorStatusError}
+          </p>
+        )}
+        {directorError && (
+          <p className="dev-message error-message" role="alert">
+            {directorError}
+          </p>
+        )}
+        <div className="director-action-row">
+          <p className="section-caption">
+            对所选 GameSession 请求一次导演局势分析。
+          </p>
+          <button
+            className="action-button"
+            type="button"
+            disabled={
+              !directorStatus?.configured ||
+              selectedGameId === null ||
+              directorLoading !== ''
+            }
+            onClick={handleAnalyzeDirectorSituation}
+          >
+            {directorLoading === 'analyze'
+              ? '分析中…'
+              : 'Analyze Situation · 分析局势'}
+          </button>
+        </div>
+        {selectedGameId === null && (
+          <p className="dev-message">请先在上方选择一局 GameSession。</p>
+        )}
+        {directorRecommendation &&
+          directorRecommendation.game_session_id === selectedGameId && (
+            <article className="director-recommendation">
+              <div className="character-debug-heading">
+                <div>
+                  <p className="eyebrow">
+                    RECOMMENDATION #{directorRecommendation.id}
+                  </p>
+                  <h3>{directorRecommendation.recommended_action}</h3>
+                </div>
+                <span className="status-tag">
+                  {directorRecommendation.status.toUpperCase()}
+                </span>
+              </div>
+              <dl className="director-details">
+                <div>
+                  <dt>节奏 Pace</dt>
+                  <dd>{directorRecommendation.pace}</dd>
+                </div>
+                <div>
+                  <dt>叙事风险 Risk</dt>
+                  <dd>{directorRecommendation.narrative_risk}</dd>
+                </div>
+                <div className="director-reason">
+                  <dt>建议理由</dt>
+                  <dd>{directorRecommendation.reason}</dd>
+                </div>
+                <div className="director-references">
+                  <dt>引用</dt>
+                  <dd>
+                    {directorRecommendation.target_game_character_id !== null &&
+                      directorRecommendation.target_game_character_id !==
+                        undefined && (
+                        <span>
+                          角色：
+                          {selectedGame?.game_characters.find(
+                            (character) =>
+                              character.id ===
+                              directorRecommendation.target_game_character_id,
+                          )?.character.name ??
+                            `#${directorRecommendation.target_game_character_id}`}
+                        </span>
+                      )}
+                    {directorRecommendation.clue_id !== null &&
+                      directorRecommendation.clue_id !== undefined && (
+                        <span>线索 #{directorRecommendation.clue_id}</span>
+                      )}
+                    {directorRecommendation.public_message_id !== null &&
+                      directorRecommendation.public_message_id !==
+                        undefined && (
+                        <span>
+                          公共消息 #{directorRecommendation.public_message_id}
+                        </span>
+                      )}
+                    {directorRecommendation.target_game_character_id === null &&
+                      directorRecommendation.clue_id === null &&
+                      directorRecommendation.public_message_id === null && (
+                        <span>无引用</span>
+                      )}
+                  </dd>
+                </div>
+              </dl>
+              <div className="director-apply-row">
+                <span className="debug-note">
+                  推荐记录只显示动作摘要、理由与引用标识。
+                </span>
+                <button
+                  className="action-button"
+                  type="button"
+                  disabled={
+                    directorLoading !== '' ||
+                    ['applied', 'rejected', 'advisory'].includes(
+                      directorRecommendation.status,
+                    )
+                  }
+                  onClick={handleApplyDirectorRecommendation}
+                >
+                  {directorLoading === 'apply' ? '应用中…' : 'Apply · 应用建议'}
+                </button>
+              </div>
+            </article>
+          )}
+        {directorOutcome &&
+          directorOutcome.recommendation_id === directorRecommendation?.id && (
+            <div
+              className={`director-outcome outcome-${directorOutcome.status}`}
+              role="status"
+            >
+              <strong>
+                {directorOutcome.status === 'applied'
+                  ? '已应用'
+                  : directorOutcome.status === 'rejected'
+                    ? '已拒绝'
+                    : '仅供参考'}
+              </strong>
+              <p>{directorOutcome.reason}</p>
+            </div>
+          )}
       </section>
 
       {myCharacter && (
@@ -1175,7 +1824,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       <footer className="footer">
         <span>仅用于验证角色信息边界与 AI 对话链路</span>
         <span className="footer-mark">
-          PHASE 06 <i /> DEVELOPMENT DEBUG
+          PHASE 07 <i /> DEVELOPMENT DEBUG
         </span>
       </footer>
     </main>

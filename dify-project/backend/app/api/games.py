@@ -40,6 +40,7 @@ from app.schemas.ai import (
     PublicTurnResponse,
 )
 from app.schemas.context import CharacterContext
+from app.schemas.flow import GameFlowState, VoteCreate, VoteRead, VoteResultRead
 from app.schemas.game import (
     CharacterSelection,
     GameCreate,
@@ -55,6 +56,7 @@ from app.schemas.game import (
 )
 from app.services.character_chat import send_character_message
 from app.services.character_context import build_character_context
+from app.services.game_flow import create_vote, get_game_flow_state, get_vote_result
 from app.services.gameplay import (
     advance_game_phase,
     create_player_message,
@@ -253,6 +255,47 @@ def read_game_state(game_id: int, db: Session = Depends(get_db)) -> GameStateRea
     """Read safe lifecycle and narrative phase information."""
     try:
         return get_game_state(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/flow", response_model=GameFlowState)
+def read_game_flow(game_id: int, db: Session = Depends(get_db)) -> GameFlowState:
+    """Return server-calculated timing and safe action eligibility."""
+    try:
+        return get_game_flow_state(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post(
+    "/games/{game_id}/votes",
+    response_model=VoteRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def cast_game_vote(
+    game_id: int,
+    payload: VoteCreate,
+    db: Session = Depends(get_db),
+) -> VoteRead:
+    """Record one development vote after deterministic membership checks."""
+    _require_development()
+    try:
+        return create_vote(db, game_id, payload)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/votes/result", response_model=VoteResultRead)
+def read_game_vote_result(
+    game_id: int, db: Session = Depends(get_db)
+) -> VoteResultRead:
+    """Expose the full tally only in the unauthenticated development environment."""
+    _require_development()
+    try:
+        return get_vote_result(db, game_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -521,3 +564,8 @@ def get_character_thoughts(
         ),
         memories=[CharacterMemoryRead.model_validate(memory) for memory in memories],
     )
+
+
+def _require_development() -> None:
+    if settings.app_env != "development":
+        raise HTTPException(status_code=404, detail="Not found")

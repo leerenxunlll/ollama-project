@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from app.game.turn_manager import (
+from app.game.speaker_scheduler import (
     MAX_AI_RESPONSES_PER_HUMAN_TURN,
     Speaker,
     select_initial_responders,

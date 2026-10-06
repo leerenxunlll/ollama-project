@@ -13,6 +13,8 @@ def persist_character_reply(
     ai_message: Message,
     reply: CharacterReply,
     related_messages: tuple[Message, ...] = (),
+    *,
+    commit: bool = True,
 ) -> Message:
     """Atomically save a character message, thought, memory, and emotion."""
     existing_memory_content = db.scalars(
@@ -52,7 +54,8 @@ def persist_character_reply(
             seen_memories.add(normalized_content)
         game_character.current_emotion = reply.emotion.value
         db.refresh(ai_message)
-        db.commit()
+        if commit:
+            db.commit()
     except Exception:
         db.rollback()
         raise
