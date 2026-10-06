@@ -19,7 +19,7 @@ flowchart LR
     Agents -->|角色对话推理与生成| Dify
 ```
 
-Phase 3 建立了固定剧情阶段、确定性游戏开始/推进、角色搜证与 public/private 消息 API。Phase 4 增加真人到单个 AI 角色的私聊闭环。Phase 5 为这条链路增加结构化角色状态与最小长期记忆；不改变 Game Engine 的确定性规则和权威信息边界。
+Phase 3 建立了固定剧情阶段、确定性游戏开始/推进、角色搜证与 public/private 消息 API。Phase 4 增加真人到单个 AI 角色的私聊闭环。Phase 5 为这条链路增加结构化角色状态与最小长期记忆。Phase 6 在不改变 Game Engine 权威边界的前提下，由 Backend 顺序编排公开回合和单角色主动发言。
 
 ## 职责边界
 
@@ -28,8 +28,45 @@ Phase 3 建立了固定剧情阶段、确定性游戏开始/推进、角色搜�
 - **Game Engine** 负责确定性游戏规则，是唯一可以校验并应用核心游戏状态变更的层。
 - **Game Engine** 负责校验角色选择状态，并锁定一个 human 与三个 ai 的确定性分配。
 - **Agent Layer** 负责 AI 推理与生成。Phase 5 的 Character Agent 返回经 Schema 验证的 speech、inner_os、emotion、intent 和 memory updates；AI 不允许直接修改核心游戏状态。
+- **Backend Turn Manager** 使用确定性规则选择公开发言角色并控制调用顺序；一轮最多请求两个 AI 公开回复，主动 step 一次只请求一个 AI 角色。它负责协调，不将选人或状态裁定交给 AI。
 - **Database** 使用 SQLite 持久化脚本模板与游戏运行数据。SQLAlchemy 模型表达真相；Alembic 负责后续表结构迁移，`create_all` 只创建缺失表。
 - **Dify** 由后端 Dify Client 调用，执行 Character Chatflow 并返回生成台词。Dify 不拥有权威游戏状态。
+
+## Multi-Agent Orchestration
+
+“多 Agent”在当前阶段表示后端按回合顺序多次调用同一个 Character Agent 实现，不代表多个独立 Dify 工作流。三个 AI 角色共用同一个 Dify Character Chatflow；每次调用都由后端分别构造 `character_context` 和 `interaction_context`。`interaction_context.mode` 只使用 `private_reply`、`public_reply`、`proactive_public`：分别表示私聊回复、公开回合回复、主动公开发言。权限仍由后端构造 Context 时落实，mode 只说明交互用途，不授予额外信息访问权限。
+
+```mermaid
+sequenceDiagram
+    participant Player as Human Player
+    participant API as FastAPI Backend
+    participant Turn as Deterministic Turn Manager
+    participant Agent as Character Agent
+    participant Dify as Shared Dify Character Chatflow
+    participant DB as SQLite
+    Player->>API: POST public-turn {content}
+    API->>Turn: validate turn and select responders
+    loop Sequentially, at most 2 AI replies
+        Turn->>Agent: character_context + interaction_context(public_reply)
+        Agent->>Dify: structured character request
+        Dify-->>Agent: Phase 5 structured output
+        Agent-->>Turn: validated reply
+        Turn->>DB: persist successful public reply
+    end
+    Turn-->>API: human_message, ai_responses, status, failures
+    API-->>Player: public-turn result
+```
+
+`POST /api/games/{game_id}/public-turn` 接受 `{ "content": "..." }`，响应含 `human_message`、`ai_responses`、`status`（`completed` 或 `partial`）和 `failures`。`partial` 用于 CharacterAgent/Dify 调用、输出校验或角色回复原子保存失败；Context 构造等未捕获服务错误仍可能返回 HTTP 500。`POST /api/games/{game_id}/ai-step` 仅在 `APP_ENV=development` 开放，用 `proactive_public` 模式触发单个 AI 角色，并返回 `ai_message`。主动 step 使用的 synthetic trigger 是后端编排信号，不是玩家发言，不创建 `Message`。公开消息仍由后端作为实际消息写入；Dify 只生成结构化角色回复，不直接写数据库。
+
+Turn Manager 负责确定性 speaker scheduling；Character Agent 负责单个角色的推理与生成；未来的 Director 负责叙事节奏与剧情编排。三者职责不同。Director AI 和 Writer AI 当前均未实现；现有 Turn Manager 不调用 Director，也不生成或修改剧本。
+
+## Multi-Agent Failure Semantics
+
+- 私聊 `POST /api/games/{game_id}/ai-chat` 保持整轮 atomic：Dify 成功并通过输出校验后，玩家消息、AI 消息、Thought、Memory 与 emotion 才一起提交；调用或校验失败不留下半轮数据。
+- 公开回合先提交 Human Message，再顺序请求角色；每条 AI Message、Thought、Memory 与 emotion 独立原子保存。CharacterAgent/Dify 调用或单条角色回复保存失败时，后端保留此前已提交的消息并以 `partial` 和脱敏 `failures` 报告。Context 构造等未捕获错误可能返回 HTTP 500，但不会撤销此前已提交的消息。`completed` 表示本次请求的步骤均成功完成。
+- 主动 step 每次仅请求一个角色。合成触发内容用于说明为何需要主动发言，不会伪装成玩家消息或存为 `Message`。
+- 所有角色调用继续使用 Phase 5 的 Structured Output；无效输出不会被持久化为 AI Message。Turn Manager 只保存经过后端校验的输出，不把 LLM 结果当成权威游戏状态。
 
 ## Deterministic Game Engine
 

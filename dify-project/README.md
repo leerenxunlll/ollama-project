@@ -1,6 +1,6 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前处于 **Phase 5：结构化角色回复、内心状态与最小长期记忆**。本阶段仍只支持真人与单个 AI 角色私聊，不启用多 Agent 协作或 AI 主动发言。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。项目按阶段建设；当前进入 **Phase 6：确定性多角色对话编排**。Phase 5 的单角色私聊继续保留；Phase 6 增加由后端顺序编排的公开对话与单角色主动发言。
 
 ## Phase 3 已完成
 
@@ -43,6 +43,12 @@ Human Player → FastAPI → CharacterContextBuilder → CharacterAgent → Dify
 
 Phase 5 增加 Alembic migration `20261005_phase5`。升级现有数据库前先执行 `alembic -c backend/alembic.ini upgrade head`；不能依赖启动时的 `create_all` 更新旧表。
 
+## Phase 6：多角色对话编排
+
+Backend 通过确定性的 Turn Manager 按顺序选择公开发言角色；一次公开玩家发言最多触发两个 AI 公开回复。玩家点名多个角色时按名字首次出现顺序选择；未点名时先按 round-robin 选择一名，再可根据其公开发言提及的未回复角色选择第二名。Development only 的主动发言 API 每次只触发一个 AI 角色。所有角色复用同一个 Dify Character Chatflow，后端提供经过权限过滤的 `character_context` 与 `interaction_context`；后者以 `private_reply`、`public_reply` 或 `proactive_public` 指明本次交互模式。Dify 仍返回 Phase 5 的相同结构化输出。
+
+既有 `POST /api/games/{game_id}/ai-chat` 保持单角色私聊的 atomic 语义：只有 AI 回复通过校验后才一起保存玩家与角色消息及角色状态。新增公开回合采用顺序、best-effort 持久化：已成功的公开消息会保留，后续角色调用失败不会回滚前面的成功消息；响应以 `completed` 或 `partial` 及 `failures` 说明结果。主动发言一次只保存并返回一条 `ai_message`。后端的 synthetic trigger 只是调用上下文，不是玩家消息，也不会作为 `Message` 写入数据库。此阶段仍不实现 Director AI 或 Writer AI。
+
 ## 技术栈
 
 | 部分 | 技术 |
@@ -50,7 +56,7 @@ Phase 5 增加 Alembic migration `20261005_phase5`。升级现有数据库前先
 | 前端 | React、TypeScript、Vite、原生 CSS |
 | 后端 | Python、FastAPI、Pydantic、SQLAlchemy 2.x |
 | 数据库 | SQLite |
-| AI 平台 | Dify Chatflow；当前用于真人与单 AI 角色私聊 |
+| AI 平台 | Dify Chatflow；用于单角色私聊与公开角色回复 |
 
 ## 目录结构
 
@@ -159,6 +165,15 @@ curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: appli
 
 将示例中的 `123` 和 `456` 替换为正在进行的游戏 ID 与该局 AI 角色 ID。成功时普通响应只有玩家消息和角色 speech；在 Development 页面刷新 **DEBUG ONLY** Inspector，确认 emotion、inner_os、intent 与 memory 已保存，随后再次发送消息并检查角色 Context 中有其自己的记忆。自动测试使用 Mock Dify，不要求真实 API Key。不要把密钥复制到命令历史、终端输出或前端代码中。
 
+Phase 6 真实多角色测试前，先按 [Chatflow 配置说明](docs/dify-character-chatflow.md)为现有 Character Chatflow 增加 `interaction_context` 输入并重新发布。然后选一局 `in_progress` 游戏，使用实际角色姓名点名一位 AI：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/games/123/public-turn -H 'Content-Type: application/json' -d '{"content": "许雁，你昨晚在哪里？"}'
+curl -X POST http://127.0.0.1:8000/api/games/123/ai-step
+```
+
+检查 `public-turn` 返回中的 `human_message`、最多两条 `ai_responses`、`status` 和 `failures`。玩家直接点名两名 AI 时，两者按出现顺序响应；若只点名一位或没有点名，第一位 AI 的公开发言也可以提及另一位 AI 来触发第二响应。达到上限后停止。模型调用或结构化输出失败会收到脱敏的 `partial` 结果，已成功保存的消息保留；Context 构造或数据库保存失败可能返回 HTTP 500。`ai-step` 仅在 `APP_ENV=development` 开放，每次只产生一条主动公开消息。分别在 Thought / Memory Inspector 中检查发言角色自己的状态，并确认 Bob 的 Context 包含 Alice 已保存的公开发言。真实 smoke test 需要 Chatflow 已发布且其模型供应商有可用配额；自动测试使用 Mock，不会请求真实 Dify。
+
 前端默认请求相对路径 `/api/...`。`frontend/vite.config.ts` 将开发环境的 `/api` 请求代理到 `VITE_API_PROXY_TARGET`（默认 `http://127.0.0.1:8000`），因此本地开发不需要额外 CORS 配置。需要指定 API origin 时，可设置 `VITE_API_BASE_URL`；不要把生产地址写进代码。
 
 ## API
@@ -178,8 +193,11 @@ curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: appli
 | GET | `/api/games/{game_id}/me/character` | 读取本局唯一 human 的公开与本人私密角色卡 |
 | GET | `/api/games/{game_id}/characters/{game_character_id}/context` | Development 专用 Context 调试 |
 | GET | `/api/games/{game_id}/characters/{game_character_id}/thoughts` | Development 专用 Thought、emotion 与 Memory 调试 |
+| GET | `/api/games/{game_id}/public-messages` | 读取公共频道记录，不返回私聊 |
 | GET | `/api/ai/status` | 检查 Character Dify 配置是否可用，不返回密钥 |
 | POST | `/api/games/{game_id}/ai-chat` | 真人向本局一个 AI 角色发送私聊并保存完整消息轮次 |
+| POST | `/api/games/{game_id}/public-turn` | 提交一条公开玩家消息，顺序请求最多两个 AI 公开回复 |
+| POST | `/api/games/{game_id}/ai-step` | Development only：触发一个 AI 角色主动公开发言 |
 | POST | `/api/games/{game_id}/start` | 校验角色分配并开始游戏 |
 | POST | `/api/games/{game_id}/advance-phase` | 按固定顺序推进一个剧情阶段 |
 | GET | `/api/games/{game_id}/investigation/locations` | 读取当前调查阶段的线索地点 |
@@ -187,6 +205,10 @@ curl -X POST http://127.0.0.1:8000/api/games/123/ai-chat -H 'Content-Type: appli
 | POST | `/api/games/{game_id}/messages` | 创建 public/private 消息；system 消息仅由后端产生 |
 
 当前没有登录认证；`/me/character` 依据 GameSession 中唯一的 `human` 角色返回角色卡，因此不能替代真实用户身份校验。Context 和 Thought 调试 API 只在 `APP_ENV=development` 时可用。Development 页面中的游戏推进由开发者手动触发，没有 Director 自动推进。
+
+#### Phase 6 对话 API 契约
+
+`POST /api/games/{game_id}/public-turn` 请求体为 `{"content": "玩家的公开发言"}`。响应包含玩家公开消息 `human_message`、零到两条成功的 AI 公开消息 `ai_responses`、`status`（`completed` 或 `partial`）和只包含角色 ID / 异常类型的脱敏 `failures`。`partial` 覆盖 CharacterAgent/Dify 调用与 structured-output 校验失败，以及角色回复原子保存失败；Context 构造等未捕获服务错误仍可能返回 HTTP 500。`POST /api/games/{game_id}/ai-step` 仅在 `APP_ENV=development` 可用，响应包含一条主动公开消息 `ai_message`。私聊保持整轮 atomic；公开回合按角色顺序处理并 best-effort 保存成功结果。
 
 ### 测试与构建
 
@@ -208,13 +230,13 @@ npm run build
 npm run format:check
 ```
 
-浏览器开发流程使用 Playwright CLI。先启动后端和 Vite，按“加载开发样例”创建一次固定 ready Script，然后在 `frontend/` 运行：
+浏览器开发流程使用 Playwright CLI。先启动后端和 Vite，按“加载开发样例”创建一次固定 ready Script，然后在 `frontend/` 运行。Playwright 通过 API 创建测试游戏；这些记录会留在当前配置的本地数据库。Development 页面检查与公共房间的 AI 响应使用 mock，不会调用真实 Dify：
 
 ```bash
 npm run test:e2e
 ```
 
-测试会通过 API 创建临时游戏，再用浏览器打开 Development 页并读取空的 AI Character Inspector；它不会调用真实 Dify。
+现有 E2E 覆盖 Development 页的空 Thought/Memory Inspector，以及公共房间的玩家消息、AI 回复、partial 提示和主动发言按钮；AI 接口响应由 Playwright mock。后端的实际回合编排由 pytest focused tests 覆盖，真实 Dify 需按上方步骤单独验证。
 
 ### Development 流程
 
@@ -223,6 +245,8 @@ npm run test:e2e
 3. 点击 **Start Game**，再用 **Advance Phase** 推进到 `investigation_1`。
 4. 选择搜证地点并搜索；新线索只加入当前真人角色的已知线索。
 5. 点击“查看授权 Context”或在搜证后查看 JSON，确认 `known_clues` 与当前角色 `memories` 更新。
-6. 在 AI Character Chat Debug 中与一个 AI 角色交谈；Inspector 仅供开发调试，普通对话只显示 speech。
+6. 在 AI Character Chat Debug 中与一个 AI 角色私聊；Inspector 仅供开发调试，普通对话只显示 speech。
+7. 在 Multi-Agent Public Room Debug 中选择进行中的游戏，提交 Public Message 并点击 **Send Public Turn**；查看 Human 与 AI 的公共消息以及是否有 partial failure。
+8. 点击 **AI Proactive Step** 触发单个角色公开发言；在 Thought / Memory Inspector 选择对应 AI 角色，检查它自己的内心状态与记忆。
 
 客户端按钮只是开发辅助；开始、阶段推进和搜证权限由后端 Game Engine 再次校验。

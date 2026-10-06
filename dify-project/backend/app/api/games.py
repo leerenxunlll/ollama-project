@@ -32,9 +32,12 @@ from app.models import (
 from app.schemas.ai import (
     AIChatRequest,
     AIChatResponse,
+    AIProactiveStepResponse,
     CharacterDebugStateRead,
     CharacterMemoryRead,
     CharacterThoughtRead,
+    PublicTurnRequest,
+    PublicTurnResponse,
 )
 from app.schemas.context import CharacterContext
 from app.schemas.game import (
@@ -60,8 +63,76 @@ from app.services.gameplay import (
     search_location,
     start_game,
 )
+from app.services.public_turn import run_proactive_step, send_public_turn
 
 router = APIRouter()
+
+
+@router.get(
+    "/games/{game_id}/public-messages",
+    response_model=list[MessageRead],
+)
+def list_public_messages(
+    game_id: int,
+    db: Session = Depends(get_db),
+) -> list[Message]:
+    """Return only the public transcript for a development room."""
+    if db.get(GameSession, game_id) is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+    return list(
+        db.scalars(
+            select(Message)
+            .where(Message.game_session_id == game_id, Message.channel_type == "public")
+            .order_by(Message.created_at, Message.id)
+        ).all()
+    )
+
+
+@router.post(
+    "/games/{game_id}/public-turn",
+    response_model=PublicTurnResponse,
+)
+def create_public_turn(
+    game_id: int,
+    payload: PublicTurnRequest,
+    db: Session = Depends(get_db),
+    agent: CharacterAgent = Depends(get_character_agent),
+) -> PublicTurnResponse:
+    """Save one human public message and coordinate up to two AI replies."""
+    try:
+        return send_public_turn(db, game_id, payload, agent)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/games/{game_id}/ai-step",
+    response_model=AIProactiveStepResponse,
+)
+def create_proactive_ai_step(
+    game_id: int,
+    db: Session = Depends(get_db),
+    agent: CharacterAgent = Depends(get_character_agent),
+) -> AIProactiveStepResponse:
+    """Generate exactly one public AI message for development debugging."""
+    if settings.app_env != "development":
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        return run_proactive_step(db, game_id, agent)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except DifyConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except DifyTimeoutError as error:
+        raise HTTPException(status_code=504, detail=str(error)) from error
+    except DifyError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except CharacterOutputValidationError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.post("/games/{game_id}/ai-chat", response_model=AIChatResponse)

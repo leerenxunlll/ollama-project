@@ -22,6 +22,7 @@ from app.models import (
 )
 from app.schemas.ai import CharacterEmotion, CharacterIntent, MemoryUpdate
 from app.schemas.context import CharacterContext
+from app.schemas.interaction import CharacterInteraction
 from app.services.seed import seed_development_data
 
 
@@ -42,14 +43,19 @@ class FakeCharacterAgent:
             memory_updates=[MemoryUpdate(content="玩家追问了旧仓库。", importance=3)],
         )
         self.context = None
+        self.interaction = None
         self.query = None
         self.user_id = None
 
     def respond(
-        self, context: CharacterContext, query: str, user_id: str
+        self,
+        context: CharacterContext,
+        interaction: CharacterInteraction,
+        user_id: str,
     ) -> CharacterReply:
         self.context = context
-        self.query = query
+        self.interaction = interaction
+        self.query = interaction.current_message
         self.user_id = user_id
         if self.error is not None:
             raise self.error
@@ -62,7 +68,13 @@ class FakeDifyClient:
     def __init__(self, answer: str) -> None:
         self.answer = answer
 
-    def chat(self, character_context: str, query: str, user_id: str) -> str:
+    def chat(
+        self,
+        character_context: str,
+        interaction_context: str,
+        query: str,
+        user_id: str,
+    ) -> str:
         return self.answer
 
 
@@ -247,6 +259,10 @@ def test_ai_chat_passes_only_target_context_and_persists_private_pair(
     assert "is_killer" not in context_json
     assert [clue.clue_id for clue in agent.context.known_clues] == [clues[0].id]
     assert agent.query == "你昨晚在哪里？"
+    assert agent.interaction.mode == "private_reply"
+    assert agent.interaction.channel == "private"
+    assert agent.interaction.source_game_character_id == human_id
+    assert agent.interaction.source_character_name == "林澈"
     assert agent.user_id == f"game-{game_id}-character-{target_id}"
 
     result = response.json()

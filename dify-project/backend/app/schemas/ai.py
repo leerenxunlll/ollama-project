@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -33,6 +34,42 @@ class AIChatResponse(BaseModel):
     """The two persisted messages produced by one successful AI chat turn."""
 
     human_message: MessageRead
+    ai_message: MessageRead
+
+
+class PublicTurnRequest(BaseModel):
+    """One human public message that may trigger a bounded AI response chain."""
+
+    content: str = Field(min_length=1)
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, content: str) -> str:
+        """Reject whitespace-only messages while preserving meaningful text."""
+        if not content.strip():
+            raise ValueError("Message content cannot be empty")
+        return content
+
+
+class PublicTurnFailure(BaseModel):
+    """A safe error label for one responder that could not produce a reply."""
+
+    game_character_id: int
+    error_type: str
+
+
+class PublicTurnResponse(BaseModel):
+    """Public messages from one bounded turn, without private AI state."""
+
+    human_message: MessageRead
+    ai_responses: list[MessageRead]
+    status: Literal["completed", "partial"]
+    failures: list[PublicTurnFailure]
+
+
+class AIProactiveStepResponse(BaseModel):
+    """The one public message created by a development proactive step."""
+
     ai_message: MessageRead
 
 

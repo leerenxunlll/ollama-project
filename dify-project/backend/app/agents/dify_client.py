@@ -52,7 +52,13 @@ class DifyClient:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
 
-    def chat(self, character_context: str, query: str, user_id: str) -> str:
+    def chat(
+        self,
+        character_context: str,
+        interaction_context: str,
+        query: str,
+        user_id: str,
+    ) -> str:
         """Return Dify's answer text or raise a classified, secret-safe error."""
         if not self.api_url.strip() or not self.api_key.strip():
             raise DifyConfigurationError(
@@ -65,7 +71,10 @@ class DifyClient:
                 f"{self.api_url}/chat-messages",
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json={
-                    "inputs": {"character_context": character_context},
+                    "inputs": {
+                        "character_context": character_context,
+                        "interaction_context": interaction_context,
+                    },
                     "query": query,
                     "response_mode": "blocking",
                     "conversation_id": "",

@@ -744,6 +744,49 @@ h1 em {
   margin-top: 18px;
 }
 
+.public-room-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.public-room-controls .field-label {
+  margin-top: 0;
+}
+
+.public-room-form {
+  margin-top: 18px;
+}
+
+.public-room-form > .field-label {
+  margin-top: 0;
+}
+
+.partial-failure-notice {
+  margin-top: 16px;
+  border: 1px solid rgb(210 120 111 / 35%);
+  background: rgb(210 120 111 / 5%);
+  color: #dca198;
+  padding: 13px 15px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.partial-failure-notice ul {
+  display: grid;
+  gap: 4px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.public-room-transcript {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
 .ai-chat-selectors {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -983,7 +1026,8 @@ h1 em {
 
   .private-card-grid,
   .context-controls,
-  .ai-chat-selectors {
+  .ai-chat-selectors,
+  .public-room-controls {
     grid-template-columns: 1fr;
   }
 

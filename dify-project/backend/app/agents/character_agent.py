@@ -11,6 +11,7 @@ from app.schemas.ai import (
     MemoryUpdate,
 )
 from app.schemas.context import CharacterContext
+from app.schemas.interaction import CharacterInteraction
 
 
 class CharacterOutputValidationError(Exception):
@@ -47,13 +48,14 @@ class CharacterAgent:
     def respond(
         self,
         context: CharacterContext,
-        query: str,
+        interaction: CharacterInteraction,
         user_id: str,
     ) -> CharacterReply:
-        """Ask Dify to roleplay the character represented by this context."""
+        """Ask Dify to respond to one explicit interaction for this character."""
         answer = self.dify_client.chat(
             character_context=context.model_dump_json(),
-            query=query,
+            interaction_context=interaction.model_dump_json(),
+            query=interaction.current_message,
             user_id=user_id,
         )
         return parse_character_reply(answer)

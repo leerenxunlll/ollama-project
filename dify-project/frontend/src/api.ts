@@ -22,6 +22,20 @@ export interface AiChatResponse {
   ai_message: MessageRead
 }
 
+export interface PublicTurnResponse {
+  human_message: MessageRead
+  ai_responses: MessageRead[]
+  status: 'completed' | 'partial'
+  failures: Array<{
+    game_character_id: number
+    error_type: string
+  }>
+}
+
+export interface AiStepResponse {
+  ai_message: MessageRead
+}
+
 export type CharacterEmotion =
   | 'calm'
   | 'nervous'
@@ -294,6 +308,25 @@ export function sendAiChat(
       content,
     }),
   })
+}
+
+export function sendPublicTurn(
+  gameId: number,
+  content: string,
+): Promise<PublicTurnResponse> {
+  return requestJson(`/api/games/${gameId}/public-turn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+}
+
+export function getPublicMessages(gameId: number): Promise<MessageRead[]> {
+  return requestJson(`/api/games/${gameId}/public-messages`)
+}
+
+export function requestAiStep(gameId: number): Promise<AiStepResponse> {
+  return requestJson(`/api/games/${gameId}/ai-step`, { method: 'POST' })
 }
 
 export function getScripts(signal?: AbortSignal): Promise<ScriptSummary[]> {

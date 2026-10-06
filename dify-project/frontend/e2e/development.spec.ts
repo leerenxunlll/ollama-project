@@ -36,7 +36,7 @@ test('opens Development and reads an AI character debug state', async ({
   await expect(
     page.getByRole('heading', { name: '游戏规则与 AI 对话验证' }),
   ).toBeVisible()
-  await page.locator('#ai-chat-game-select').selectOption(String(game.id))
+  await page.locator('#public-room-game-select').selectOption(String(game.id))
   await page.getByRole('button', { name: '读取角色状态' }).click()
   await expect(page.getByText('尚无角色内心记录。')).toBeVisible()
   await expect(page.getByText('尚无已保存记忆。')).toBeVisible()

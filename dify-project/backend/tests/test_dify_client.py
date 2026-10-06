@@ -16,6 +16,8 @@ from app.agents.dify_client import (
 )
 from app.core.config import Settings
 
+INTERACTION_CONTEXT = '{"mode":"private_reply","channel":"private"}'
+
 
 def test_dify_client_sends_blocking_request_and_parses_answer(monkeypatch) -> None:
     request_data = {}
@@ -29,14 +31,22 @@ def test_dify_client_sends_blocking_request_and_parses_answer(monkeypatch) -> No
     monkeypatch.setattr("app.agents.dify_client.httpx.post", fake_post)
     client = DifyClient("https://dify.example/v1/", "private-test-key", 12.5)
 
-    answer = client.chat('{"character":"safe"}', "你在哪里？", "game-1-character-2")
+    answer = client.chat(
+        '{"character":"safe"}',
+        INTERACTION_CONTEXT,
+        "你在哪里？",
+        "game-1-character-2",
+    )
 
     assert answer == "我当时在仓库。"
     assert request_data == {
         "url": "https://dify.example/v1/chat-messages",
         "headers": {"Authorization": "Bearer private-test-key"},
         "json": {
-            "inputs": {"character_context": '{"character":"safe"}'},
+            "inputs": {
+                "character_context": '{"character":"safe"}',
+                "interaction_context": INTERACTION_CONTEXT,
+            },
             "query": "你在哪里？",
             "response_mode": "blocking",
             "conversation_id": "",
@@ -65,7 +75,7 @@ def test_dify_http_errors_are_classified(
     client = DifyClient("https://dify.example/v1", "test-key")
 
     with pytest.raises(error_type):
-        client.chat("{}", "query", "game-1-character-2")
+        client.chat("{}", INTERACTION_CONTEXT, "query", "game-1-character-2")
 
 
 def test_dify_malformed_and_empty_responses_are_rejected(monkeypatch) -> None:
@@ -75,14 +85,14 @@ def test_dify_malformed_and_empty_responses_are_rejected(monkeypatch) -> None:
         lambda *_args, **_kwargs: httpx.Response(200, text="not json"),
     )
     with pytest.raises(DifyResponseError, match="malformed JSON"):
-        client.chat("{}", "query", "user")
+        client.chat("{}", INTERACTION_CONTEXT, "query", "user")
 
     monkeypatch.setattr(
         "app.agents.dify_client.httpx.post",
         lambda *_args, **_kwargs: httpx.Response(200, json={"answer": "  "}),
     )
     with pytest.raises(DifyResponseError, match="did not contain an answer"):
-        client.chat("{}", "query", "user")
+        client.chat("{}", INTERACTION_CONTEXT, "query", "user")
 
 
 def test_dify_timeout_and_connection_failures_are_classified(monkeypatch) -> None:
@@ -92,21 +102,21 @@ def test_dify_timeout_and_connection_failures_are_classified(monkeypatch) -> Non
         lambda *_args, **_kwargs: (_ for _ in ()).throw(httpx.ReadTimeout("slow")),
     )
     with pytest.raises(DifyTimeoutError):
-        client.chat("{}", "query", "user")
+        client.chat("{}", INTERACTION_CONTEXT, "query", "user")
 
     monkeypatch.setattr(
         "app.agents.dify_client.httpx.post",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(httpx.ConnectError("offline")),
     )
     with pytest.raises(DifyConnectionError):
-        client.chat("{}", "query", "user")
+        client.chat("{}", INTERACTION_CONTEXT, "query", "user")
 
     monkeypatch.setattr(
         "app.agents.dify_client.httpx.post",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad proxy")),
     )
     with pytest.raises(DifyConnectionError, match="check proxy settings"):
-        client.chat("{}", "query", "user")
+        client.chat("{}", INTERACTION_CONTEXT, "query", "user")
 
 
 def test_dify_requires_url_and_key_without_requesting_network(monkeypatch) -> None:
@@ -119,7 +129,7 @@ def test_dify_requires_url_and_key_without_requesting_network(monkeypatch) -> No
 
     monkeypatch.setattr("app.agents.dify_client.httpx.post", fake_post)
     with pytest.raises(DifyConfigurationError):
-        DifyClient("", "").chat("{}", "query", "user")
+        DifyClient("", "").chat("{}", INTERACTION_CONTEXT, "query", "user")
     assert called is False
 
 

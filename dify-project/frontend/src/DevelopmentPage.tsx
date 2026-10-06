@@ -11,14 +11,19 @@ import {
   getInvestigationLocations,
   getMyCharacter,
   getCharacterThoughts,
+  getPublicMessages,
   getScripts,
   getSelectableCharacters,
   selectCharacter,
   searchInvestigationLocation,
+  requestAiStep,
   sendAiChat,
+  sendPublicTurn,
   startGame,
+  type MessageRead,
   type AiChatResponse,
   type AiStatusResponse,
+  type PublicTurnResponse,
   type CharacterContext,
   type CharacterDebugState,
   type GameResponse,
@@ -76,6 +81,12 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     useState<CharacterDebugState | null>(null)
   const [characterDebugLoading, setCharacterDebugLoading] = useState(false)
   const [characterDebugError, setCharacterDebugError] = useState('')
+  const [publicMessage, setPublicMessage] = useState('')
+  const [publicMessages, setPublicMessages] = useState<MessageRead[]>([])
+  const [publicRoomError, setPublicRoomError] = useState('')
+  const [publicRoomLoading, setPublicRoomLoading] = useState('')
+  const [publicTurnResult, setPublicTurnResult] =
+    useState<PublicTurnResponse | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -110,6 +121,30 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
     return () => controller.abort()
   }, [])
+
+  useEffect(() => {
+    if (aiChatGameId === null) {
+      setPublicMessages([])
+      return
+    }
+
+    let active = true
+    getPublicMessages(aiChatGameId)
+      .then((messages) => {
+        if (active) setPublicMessages(messages)
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setPublicRoomError(
+            error instanceof Error ? error.message : '读取公共记录失败',
+          )
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [aiChatGameId])
 
   const inProgressGames = games.filter((item) => item.status === 'in_progress')
   const aiChatGame = inProgressGames.find((item) => item.id === aiChatGameId)
@@ -326,6 +361,50 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     }
   }
 
+  async function handlePublicTurn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (aiChatGameId === null || publicMessage.trim() === '') return
+
+    setPublicRoomLoading('public-turn')
+    setPublicRoomError('')
+    try {
+      const response = await sendPublicTurn(aiChatGameId, publicMessage.trim())
+      setPublicMessages((messages) => [
+        ...messages,
+        ...[response.human_message, ...response.ai_responses].filter(
+          (message) => message.channel_type === 'public',
+        ),
+      ])
+      setPublicTurnResult(response)
+      setPublicMessage('')
+    } catch (error) {
+      setPublicRoomError(
+        error instanceof Error ? error.message : '公共回合失败',
+      )
+    } finally {
+      setPublicRoomLoading('')
+    }
+  }
+
+  async function handleAiStep() {
+    if (aiChatGameId === null) return
+
+    setPublicRoomLoading('ai-step')
+    setPublicRoomError('')
+    try {
+      const response = await requestAiStep(aiChatGameId)
+      if (response.ai_message.channel_type === 'public') {
+        setPublicMessages((messages) => [...messages, response.ai_message])
+      }
+    } catch (error) {
+      setPublicRoomError(
+        error instanceof Error ? error.message : 'AI 主动发言失败',
+      )
+    } finally {
+      setPublicRoomLoading('')
+    }
+  }
+
   async function handleLoadCharacterDebug() {
     if (aiChatGameId === null || selectedAiTargetId === null) return
 
@@ -362,11 +441,11 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       <section className="dev-intro">
         <p className="eyebrow">
-          <span /> PHASE 05 / CHARACTER COGNITIVE STATE DEBUG
+          <span /> PHASE 06 / MULTI-AGENT PUBLIC ROOM DEBUG
         </p>
         <h1>游戏规则与 AI 对话验证</h1>
         <p className="description">
-          验证确定性游戏规则、角色信息边界与单个 AI 角色私聊链路。
+          验证公共回合中真人发言与多个 AI 角色的公开回应。
         </p>
       </section>
 
@@ -726,11 +805,14 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
         </section>
       )}
 
-      <section className="dev-panel detail-panel" aria-label="AI 角色对话调试">
+      <section
+        className="dev-panel detail-panel"
+        aria-label="多智能体公共房间调试"
+      >
         <div className="dev-panel-heading">
           <div>
             <p className="eyebrow">DEVELOPMENT ONLY</p>
-            <h2>AI Character Chat Debug</h2>
+            <h2>Multi-Agent Public Room Debug</h2>
           </div>
           <span
             className={`ai-status-pill ${
@@ -760,40 +842,170 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           </p>
         )}
 
+        <div className="public-room-controls">
+          <div>
+            <label className="field-label" htmlFor="public-room-game-select">
+              进行中的 GameSession
+            </label>
+            <select
+              className="dev-select"
+              id="public-room-game-select"
+              value={aiChatGameId ?? ''}
+              disabled={inProgressGames.length === 0}
+              onChange={(event) => {
+                const gameId = Number(event.target.value)
+                setAiChatGameId(gameId || null)
+                setAiTargetCharacterId(null)
+                setPublicMessages([])
+                setPublicMessage('')
+                setPublicTurnResult(null)
+                setPublicRoomError('')
+                setAiChatResponse(null)
+                setAiChatError('')
+                setCharacterDebugState(null)
+                setCharacterDebugError('')
+              }}
+            >
+              <option value="">
+                {inProgressGames.length === 0
+                  ? '没有进行中的游戏'
+                  : '选择 GameSession'}
+              </option>
+              {inProgressGames.map((item) => (
+                <option key={item.id} value={item.id}>
+                  #{item.id} · Script #{item.script_id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            className="action-button"
+            type="button"
+            disabled={
+              !aiStatus?.configured ||
+              aiChatGameId === null ||
+              publicRoomLoading !== ''
+            }
+            onClick={handleAiStep}
+          >
+            {publicRoomLoading === 'ai-step'
+              ? '等待 AI 发言…'
+              : 'AI Proactive Step · AI 主动发言'}
+          </button>
+        </div>
+
+        <form className="public-room-form" onSubmit={handlePublicTurn}>
+          <label className="field-label" htmlFor="public-room-message">
+            公共发言
+          </label>
+          <textarea
+            className="ai-chat-input"
+            id="public-room-message"
+            rows={3}
+            value={publicMessage}
+            placeholder="输入所有角色都能听到的话…"
+            onChange={(event) => setPublicMessage(event.target.value)}
+          />
+          <div className="ai-chat-submit-row">
+            {!aiStatus?.configured && (
+              <p className="section-caption">
+                配置 Dify 后端密钥后即可运行公共回合。
+              </p>
+            )}
+            <button
+              className="action-button"
+              type="submit"
+              disabled={
+                !aiStatus?.configured ||
+                aiChatGameId === null ||
+                publicMessage.trim() === '' ||
+                publicRoomLoading !== ''
+              }
+            >
+              {publicRoomLoading === 'public-turn'
+                ? '公共回合处理中…'
+                : '发送 Public Turn · 发送公共回合'}
+            </button>
+          </div>
+        </form>
+
+        {publicRoomError && (
+          <p className="dev-message error-message" role="alert">
+            {publicRoomError}
+          </p>
+        )}
+        {publicTurnResult?.status === 'partial' && (
+          <div className="partial-failure-notice" role="status">
+            <strong>本次公共回合部分失败</strong>
+            {publicTurnResult.failures.length === 0 ? (
+              <p>一个或多个 AI 角色未能回应。</p>
+            ) : (
+              <ul>
+                {publicTurnResult.failures.map((failure) => {
+                  const failedCharacter = aiChatGame?.game_characters.find(
+                    (character) => character.id === failure.game_character_id,
+                  )
+                  return (
+                    <li key={failure.game_character_id}>
+                      {failedCharacter?.character.name ??
+                        `角色 #${failure.game_character_id}`}
+                      ：{failure.error_type}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <div className="public-room-transcript" aria-live="polite">
+          {publicMessages.length === 0 ? (
+            <p className="dev-message">
+              {aiChatGameId === null
+                ? '选择一局进行中的游戏后即可测试公共对话。'
+                : '公共记录将在本页面发送或触发 AI 发言后显示。'}
+            </p>
+          ) : (
+            publicMessages.map((message) => {
+              const sender = aiChatGame?.game_characters.find(
+                (character) =>
+                  character.id === message.sender_game_character_id,
+              )
+              const senderType =
+                sender?.controller_type === 'human'
+                  ? 'HUMAN'
+                  : sender?.controller_type === 'ai'
+                    ? 'AI'
+                    : 'SYSTEM'
+
+              return (
+                <article
+                  className={`ai-chat-message ${
+                    senderType === 'HUMAN' ? 'human-message' : ''
+                  }`}
+                  key={message.id}
+                >
+                  <span>
+                    {senderType} · {sender?.character.name ?? '系统'} · PUBLIC
+                  </span>
+                  <p>{message.content}</p>
+                </article>
+              )
+            })
+          )}
+        </div>
+      </section>
+
+      <section className="dev-panel detail-panel" aria-label="AI 角色对话调试">
+        <div className="dev-panel-heading">
+          <div>
+            <p className="eyebrow">DEVELOPMENT ONLY</p>
+            <h2>AI Character Chat Debug</h2>
+          </div>
+        </div>
+
         <form className="ai-chat-form" onSubmit={handleAiChat}>
           <div className="ai-chat-selectors">
-            <div>
-              <label className="field-label" htmlFor="ai-chat-game-select">
-                进行中的 GameSession
-              </label>
-              <select
-                className="dev-select"
-                id="ai-chat-game-select"
-                value={aiChatGameId ?? ''}
-                disabled={inProgressGames.length === 0}
-                onChange={(event) => {
-                  const gameId = Number(event.target.value)
-                  setAiChatGameId(gameId || null)
-                  setAiTargetCharacterId(null)
-                  setAiChatResponse(null)
-                  setAiChatError('')
-                  setCharacterDebugState(null)
-                  setCharacterDebugError('')
-                }}
-              >
-                <option value="">
-                  {inProgressGames.length === 0
-                    ? '没有进行中的游戏'
-                    : '选择 GameSession'}
-                </option>
-                {inProgressGames.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    #{item.id} · Script #{item.script_id}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div>
               <label className="field-label" htmlFor="ai-chat-character-select">
                 AI 角色
@@ -822,6 +1034,9 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
               </select>
             </div>
           </div>
+          <p className="debug-note">
+            私聊测试使用公共房间中选择的 GameSession。
+          </p>
 
           <label className="field-label" htmlFor="ai-chat-content">
             发给角色的话
@@ -865,14 +1080,23 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           <div className="ai-chat-result" aria-live="polite">
             <article className="ai-chat-message human-message">
               <span>
-                玩家 →{' '}
+                HUMAN ·{' '}
+                {aiChatGame?.game_characters.find(
+                  (item) => item.controller_type === 'human',
+                )?.character.name ?? '玩家'}{' '}
+                · PRIVATE →{' '}
                 {aiCharacters.find((item) => item.id === selectedAiTargetId)
                   ?.character.name ?? 'AI 角色'}
               </span>
               <p>{aiChatResponse.human_message.content}</p>
             </article>
             <article className="ai-chat-message">
-              <span>AI 角色回复</span>
+              <span>
+                AI ·{' '}
+                {aiCharacters.find((item) => item.id === selectedAiTargetId)
+                  ?.character.name ?? 'AI 角色'}{' '}
+                · PRIVATE
+              </span>
               <p>{aiChatResponse.ai_message.content}</p>
             </article>
           </div>
@@ -951,7 +1175,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       <footer className="footer">
         <span>仅用于验证角色信息边界与 AI 对话链路</span>
         <span className="footer-mark">
-          PHASE 05 <i /> DEVELOPMENT DEBUG
+          PHASE 06 <i /> DEVELOPMENT DEBUG
         </span>
       </footer>
     </main>
