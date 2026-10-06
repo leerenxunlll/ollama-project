@@ -9,3 +9,4 @@
 - [x] Phase 7：完整验证
 - [x] Python 依赖与使用说明
 - [x] Ollama 子目录路径与数据库忽略规则
+- [x] 记录 Ollama CPU / Vulkan GPU 对比实验
