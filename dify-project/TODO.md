@@ -5,4 +5,4 @@
 - [x] Phase 2：角色选择、信息访问控制与 Agent Context Builder
 - [x] Phase 3：Game Engine、游戏状态机与确定性搜证规则
 - [x] Phase 4：Dify 基础接入与单 Character Agent 私聊闭环
-- [ ] Phase 5：结构化角色回复、内心状态与最小长期记忆（待发布结构化 Chatflow）
+- [x] Phase 5：结构化角色回复、内心状态与最小长期记忆（待发布结构化 Chatflow）
