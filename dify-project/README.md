@@ -112,11 +112,15 @@ alembic -c backend/alembic.ini upgrade head
 
 ### 启动后端
 
+请在项目根目录 `dify-project/` 执行。首次创建数据库或升级包含数据库变更的版本时，先按上一节执行 Alembic 迁移；FastAPI 启动时的 `create_all()` 只创建缺失表，不会更新已有表结构。迁移与后端应从同一目录启动，以使用同一个相对路径 SQLite 数据库。
+
+启动时移除不兼容的全局代理变量 `ALL_PROXY` / `all_proxy`，保留已有的 `HTTP_PROXY` / `HTTPS_PROXY`：
+
 ```bash
-uvicorn app.main:app --app-dir backend --reload
+env -u ALL_PROXY -u all_proxy uvicorn app.main:app --app-dir backend --reload
 ```
 
-SQLite 表会在后端启动时创建。接口文档地址：<http://127.0.0.1:8000/docs>。
+接口文档地址：<http://127.0.0.1:8000/docs>。
 
 ### 加载开发样例
 
