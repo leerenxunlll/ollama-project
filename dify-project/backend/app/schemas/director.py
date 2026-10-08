@@ -201,7 +201,7 @@ class DirectorRecommendationRead(BaseModel):
     clue_id: int | None
     public_message_id: int | None
     reason: str
-    status: Literal["pending", "applied", "rejected", "advisory"]
+    status: Literal["pending", "applying", "applied", "rejected", "advisory"]
     created_at: datetime
     applied_at: datetime | None
 

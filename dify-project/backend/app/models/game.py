@@ -234,7 +234,7 @@ class DirectorRecommendationRecord(Base):
             name="ck_director_recommendations_action",
         ),
         CheckConstraint(
-            "status IN ('pending', 'applied', 'rejected', 'advisory')",
+            "status IN ('pending', 'applying', 'applied', 'rejected', 'advisory')",
             name="ck_director_recommendations_status",
         ),
         ForeignKeyConstraint(

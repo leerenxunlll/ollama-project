@@ -1044,6 +1044,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
               {[
                 ['搜证', currentGameFlow.can_investigate],
                 ['讨论', currentGameFlow.can_discuss],
+                ['公开发言', currentGameFlow.can_public_speak],
                 ['投票', currentGameFlow.can_vote],
                 ['推进阶段', currentGameFlow.can_advance],
                 ['游戏结束', currentGameFlow.is_finished],
@@ -1337,7 +1338,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
                   type="button"
                   disabled={
                     directorLoading !== '' ||
-                    ['applied', 'rejected', 'advisory'].includes(
+                    ['applying', 'applied', 'rejected', 'advisory'].includes(
                       directorRecommendation.status,
                     )
                   }

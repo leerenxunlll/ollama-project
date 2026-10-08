@@ -19,6 +19,23 @@ PHASE_MINIMUM_DURATIONS_SECONDS = {
     "ending": 0,
 }
 DISCUSSION_PHASES = frozenset({"discussion_1", "discussion_2", "final_discussion"})
+PUBLIC_SPEECH_PHASES = frozenset(
+    {
+        "intro",
+        "act_1",
+        "investigation_1",
+        "discussion_1",
+        "act_2",
+        "investigation_2",
+        "discussion_2",
+        "final_discussion",
+    }
+)
+
+
+def can_public_speak(status: str, current_phase: str) -> bool:
+    """Return whether public human or AI speech is allowed in this phase."""
+    return status == "in_progress" and current_phase in PUBLIC_SPEECH_PHASES
 
 
 def build_flow_state(
@@ -56,6 +73,7 @@ def build_flow_state(
         minimum_time_satisfied=minimum_time_satisfied,
         can_investigate=can_investigate(status, current_phase),
         can_discuss=in_progress and current_phase in DISCUSSION_PHASES,
+        can_public_speak=can_public_speak(status, current_phase),
         can_vote=in_progress and is_vote_phase and not voting_complete,
         can_advance=(
             in_progress

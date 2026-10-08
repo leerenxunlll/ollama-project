@@ -384,6 +384,13 @@ def test_player_message_api_enforces_public_private_and_session_boundaries(
 ) -> None:
     first_game = _create_game(client, db_session)
     other_game = _create_game(client, db_session)
+    selected = client.post(
+        f"/api/games/{first_game['id']}/select-character",
+        json={"game_character_id": first_game["game_characters"][0]["id"]},
+    )
+    assert selected.status_code == 200
+    started = client.post(f"/api/games/{first_game['id']}/start")
+    assert started.status_code == 200
     sender_id = first_game["game_characters"][0]["id"]
     receiver_id = first_game["game_characters"][1]["id"]
     foreign_id = other_game["game_characters"][0]["id"]
@@ -468,4 +475,45 @@ def test_player_message_api_enforces_public_private_and_session_boundaries(
     assert self_message.status_code == 409
     assert foreign_sender.status_code == 404
     assert foreign_receiver.status_code == 404
+    assert (
+        db_session.scalar(
+            select(func.count(Message.id)).where(
+                Message.game_session_id == first_game["id"],
+                Message.channel_type.in_(("public", "private")),
+            )
+        )
+        == 2
+    )
+
+
+def test_public_message_obeys_phase_gate_while_private_message_rules_stay_unchanged(
+    client, db_session: Session
+) -> None:
+    game, _state = _start_game(client, db_session)
+    game_record = db_session.get(GameSession, game["id"])
+    game_record.current_phase = "vote"
+    db_session.commit()
+    sender_id = game["game_characters"][0]["id"]
+    receiver_id = game["game_characters"][1]["id"]
+
+    public = client.post(
+        f"/api/games/{game['id']}/messages",
+        json={
+            "sender_game_character_id": sender_id,
+            "channel_type": "public",
+            "content": "投票阶段不能再发公开消息。",
+        },
+    )
+    private = client.post(
+        f"/api/games/{game['id']}/messages",
+        json={
+            "sender_game_character_id": sender_id,
+            "channel_type": "private",
+            "receiver_game_character_id": receiver_id,
+            "content": "现有私聊规则保持不变。",
+        },
+    )
+
+    assert public.status_code == 409
+    assert private.status_code == 201
     assert db_session.scalar(select(func.count(Message.id))) == 2

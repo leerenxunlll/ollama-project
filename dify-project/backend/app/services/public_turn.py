@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.agents.character_agent import CharacterAgent
+from app.game.flow_manager import can_public_speak
 from app.game.speaker_scheduler import (
     MAX_AI_RESPONSES_PER_HUMAN_TURN,
     Speaker,
@@ -45,6 +46,8 @@ def send_public_turn(
         raise LookupError("Game not found")
     if game.status != "in_progress":
         raise GameRuleError("Public chat requires an in-progress game")
+    if not can_public_speak(game.status, game.current_phase):
+        raise GameRuleError("Public speech is not allowed in the current phase")
 
     characters = _load_game_characters(db, game_id)
     humans = [
@@ -176,6 +179,8 @@ def run_proactive_step(
         raise LookupError("Game not found")
     if game.status != "in_progress":
         raise GameRuleError("AI step requires an in-progress game")
+    if not can_public_speak(game.status, game.current_phase):
+        raise GameRuleError("Public speech is not allowed in the current phase")
 
     ai_characters = [
         character
@@ -204,6 +209,8 @@ def run_proactive_speaker_step(
         raise LookupError("Game not found")
     if game.status != "in_progress":
         raise GameRuleError("AI step requires an in-progress game")
+    if not can_public_speak(game.status, game.current_phase):
+        raise GameRuleError("Public speech is not allowed in the current phase")
 
     ai_characters = [
         character
@@ -228,6 +235,8 @@ def run_proactive_speaker_step(
     )
     context = build_character_context(db, game_id, runtime_character.id)
     user_id = f"game-{game_id}-character-{runtime_character.id}"
+    # Release SQLite's read transaction before the potentially slow Dify call.
+    db.commit()
     reply = agent.respond(context, interaction, user_id)
     ai_message = Message(
         game_session_id=game_id,

@@ -3,9 +3,11 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -111,6 +113,12 @@ def test_phase6_database_upgrade_adds_flow_and_director_tables_preserving_data(
     assert "phase_started_at" in {
         column["name"] for column in inspector.get_columns("game_sessions")
     }
+    status_check = next(
+        constraint["sqltext"]
+        for constraint in inspector.get_check_constraints("director_recommendations")
+        if constraint["name"] == "ck_director_recommendations_status"
+    )
+    assert "applying" in status_check
     with engine.connect() as connection:
         assert (
             connection.scalar(
@@ -158,4 +166,27 @@ def test_phase6_database_upgrade_adds_flow_and_director_tables_preserving_data(
         )
         assert upgraded_phase_time is not None
         assert str(started_at.date()) in upgraded_phase_time
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO director_recommendations "
+                "(game_session_id, pace, narrative_risk, recommended_action, "
+                "reason, status, created_at) VALUES "
+                "(:game_id, 'stalled', 'low', 'no_action', 'claim test', "
+                "'applying', :created_at)"
+            ),
+            {"game_id": game_id, "created_at": datetime.now(timezone.utc)},
+        )
+    with engine.begin() as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "INSERT INTO director_recommendations "
+                    "(game_session_id, pace, narrative_risk, recommended_action, "
+                    "reason, status, created_at) VALUES "
+                    "(:game_id, 'stalled', 'low', 'no_action', 'invalid test', "
+                    "'unknown', :created_at)"
+                ),
+                {"game_id": game_id, "created_at": datetime.now(timezone.utc)},
+            )
     engine.dispose()

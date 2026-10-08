@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.game.flow_manager import can_public_speak
 from app.game.state_machine import (
     GameRuleError,
     can_investigate,
@@ -207,6 +208,10 @@ def create_player_message(
         raise LookupError("Sender not found in this game")
 
     receiver = None
+    if payload.channel_type == "public" and not can_public_speak(
+        game.status, game.current_phase
+    ):
+        raise GameRuleError("Public speech is not allowed in the current phase")
     if payload.channel_type == "private":
         receiver = db.get(GameCharacter, payload.receiver_game_character_id)
         if receiver is None or receiver.game_session_id != game.id:

@@ -124,6 +124,7 @@ test('shows the Phase 7 game flow and Director debug without private context', a
         minimum_time_satisfied: false,
         can_investigate: false,
         can_discuss: false,
+        can_public_speak: false,
         can_vote: true,
         can_advance: false,
         is_finished: false,
@@ -236,6 +237,7 @@ test('shows the Phase 7 game flow and Director debug without private context', a
   await expect(page.locator('.flow-summary-grid')).toContainText(
     /0:2[0-9]|0:30/,
   )
+  await expect(page.getByText('公开发言 · 不可用')).toBeVisible()
   await expect(page.getByText('投票 · 允许')).toBeVisible()
   await expect(
     page.getByRole('heading', { name: '投票提交流程' }),

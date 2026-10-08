@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.agents.character_agent import CharacterAgent
@@ -22,6 +23,10 @@ from app.schemas.game import MessageRead
 from app.services.game_flow import get_game_flow_state
 from app.services.gameplay import advance_game_phase
 from app.services.public_turn import run_proactive_speaker_step
+
+
+class DirectorApplyConflict(Exception):
+    """The recommendation is already being applied or has been handled."""
 
 
 def validate_director_references(
@@ -66,16 +71,33 @@ def apply_director_recommendation(
     now: datetime | None = None,
 ) -> DirectorApplyResponse:
     """Resolve one persisted recommendation through deterministic backend checks."""
-    record = db.get(DirectorRecommendationRecord, recommendation_id)
-    if record is None or record.game_session_id != game_id:
-        raise LookupError("Director recommendation not found")
-
-    if record.status != "pending":
-        return DirectorApplyResponse(
-            recommendation_id=record.id,
-            status=record.status,
-            reason="Recommendation was already handled",
+    claim = db.execute(
+        update(DirectorRecommendationRecord)
+        .where(
+            DirectorRecommendationRecord.id == recommendation_id,
+            DirectorRecommendationRecord.game_session_id == game_id,
+            DirectorRecommendationRecord.status == "pending",
         )
+        .values(status="applying")
+    )
+    if claim.rowcount != 1:
+        db.rollback()
+        record = db.scalar(
+            select(DirectorRecommendationRecord).where(
+                DirectorRecommendationRecord.id == recommendation_id,
+                DirectorRecommendationRecord.game_session_id == game_id,
+            )
+        )
+        if record is None:
+            raise LookupError("Director recommendation not found")
+        raise DirectorApplyConflict(
+            f"Recommendation is already {record.status} and cannot be applied"
+        )
+
+    db.commit()
+    record = db.get(DirectorRecommendationRecord, recommendation_id)
+    if record is None:
+        raise LookupError("Director recommendation not found")
 
     action = DirectorAction(record.recommended_action)
     current_time = now or datetime.now(timezone.utc)
@@ -93,15 +115,17 @@ def apply_director_recommendation(
     flow_state = None
     try:
         game = validate_director_references(db, game_id, recommendation)
+        db.commit()
         if action == DirectorAction.no_action:
             outcome = "applied"
             reason = "No action was needed"
         elif action == DirectorAction.request_ai_speaker:
             flow = get_game_flow_state(db, game.id, now=current_time)
-            if game.status != "in_progress" or not flow.can_discuss:
+            if not flow.can_public_speak:
                 raise GameRuleError(
-                    "An AI speaker can only be requested during active discussion"
+                    "An AI speaker can only be requested when public speech is allowed"
                 )
+            db.commit()
             proactive_result = run_proactive_speaker_step(
                 db,
                 game.id,

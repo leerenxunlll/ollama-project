@@ -12,6 +12,7 @@ from app.models import (
     CharacterMemory,
     CharacterThought,
     GameCharacter,
+    GameSession,
     Message,
 )
 from app.schemas.ai import CharacterEmotion, CharacterIntent, MemoryUpdate
@@ -75,6 +76,12 @@ def _install_agent(client, agent: FakeCharacterAgent) -> None:
     from app.agents.character_agent import get_character_agent
 
     client.app.dependency_overrides[get_character_agent] = lambda: agent
+
+
+def _set_phase(db_session: Session, game_id: int, phase: str) -> None:
+    game = db_session.get(GameSession, game_id)
+    game.current_phase = phase
+    db_session.commit()
 
 
 @pytest.mark.parametrize("mentioned_name", ["许雁", "周序"])
@@ -480,6 +487,88 @@ def test_proactive_step_saves_exactly_one_public_ai_message_and_rotates(
     assert second.status_code == 200
     assert second.json()["ai_message"]["sender_game_character_id"] == characters["周序"]
     assert len(second_agent.calls) == 1
+
+
+@pytest.mark.parametrize("phase", ["investigation_1", "discussion_1"])
+def test_public_turn_is_allowed_in_investigation_and_discussion(
+    client, db_session: Session, phase: str
+) -> None:
+    game, _characters = _start_game(client, db_session)
+    _set_phase(db_session, game["id"], phase)
+    agent = FakeCharacterAgent([_reply("我可以补充。")])
+    _install_agent(client, agent)
+
+    response = client.post(
+        f"/api/games/{game['id']}/public-turn",
+        json={"content": "许雁，你怎么看？"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["human_message"]["channel_type"] == "public"
+    assert len(agent.calls) == 1
+
+
+@pytest.mark.parametrize("phase", ["vote", "ending"])
+def test_public_turn_rejects_vote_and_ending_before_saving_messages(
+    client, db_session: Session, phase: str
+) -> None:
+    game, _characters = _start_game(client, db_session)
+    _set_phase(db_session, game["id"], phase)
+    agent = FakeCharacterAgent([])
+    _install_agent(client, agent)
+
+    response = client.post(
+        f"/api/games/{game['id']}/public-turn",
+        json={"content": "现在还能讨论吗？"},
+    )
+
+    assert response.status_code == 409
+    assert agent.calls == []
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.game_session_id == game["id"])
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("phase", "allowed"),
+    [
+        ("intro", True),
+        ("investigation_1", True),
+        ("discussion_1", True),
+        ("vote", False),
+        ("ending", False),
+    ],
+)
+def test_ai_step_uses_public_speech_eligibility(
+    client, db_session: Session, phase: str, allowed: bool
+) -> None:
+    game, _characters = _start_game(client, db_session)
+    _set_phase(db_session, game["id"], phase)
+    agent = (
+        FakeCharacterAgent([_reply("我来补充。")])
+        if allowed
+        else FakeCharacterAgent([])
+    )
+    _install_agent(client, agent)
+
+    response = client.post(f"/api/games/{game['id']}/ai-step")
+
+    assert response.status_code == (200 if allowed else 409)
+    assert len(agent.calls) == (1 if allowed else 0)
+    assert db_session.scalar(
+        select(func.count())
+        .select_from(Message)
+        .where(
+            Message.game_session_id == game["id"],
+            Message.channel_type == "public",
+            Message.sender_game_character_id.is_not(None),
+        )
+    ) == (1 if allowed else 0)
 
 
 def test_public_turn_requires_active_game_and_ai_step_is_development_only(

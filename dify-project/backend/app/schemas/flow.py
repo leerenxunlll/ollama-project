@@ -26,6 +26,7 @@ class GameFlowState(BaseModel):
     minimum_time_satisfied: bool
     can_investigate: bool
     can_discuss: bool
+    can_public_speak: bool
     can_vote: bool
     can_advance: bool
     is_finished: bool

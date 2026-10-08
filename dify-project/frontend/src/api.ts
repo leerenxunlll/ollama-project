@@ -145,6 +145,7 @@ export interface GameFlowState {
   minimum_time_satisfied: boolean
   can_investigate: boolean
   can_discuss: boolean
+  can_public_speak: boolean
   can_vote: boolean
   can_advance: boolean
   is_finished: boolean
@@ -188,7 +189,7 @@ export interface DirectorRecommendationRecord {
   clue_id: number | null
   public_message_id: number | null
   reason: string
-  status: string
+  status: 'pending' | 'applying' | 'applied' | 'rejected' | 'advisory'
   created_at: string
   applied_at: string | null
 }

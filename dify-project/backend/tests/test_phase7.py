@@ -221,6 +221,47 @@ def test_flow_manager_clock_injection_and_vote_gate() -> None:
     assert complete.can_advance is True
 
 
+@pytest.mark.parametrize(
+    ("phase", "expected"),
+    [
+        ("intro", True),
+        ("act_1", True),
+        ("investigation_1", True),
+        ("discussion_1", True),
+        ("act_2", True),
+        ("investigation_2", True),
+        ("discussion_2", True),
+        ("final_discussion", True),
+        ("vote", False),
+        ("ending", False),
+    ],
+)
+def test_flow_state_has_explicit_public_speech_policy(
+    phase: str, expected: bool
+) -> None:
+    state = build_flow_state(
+        game_id=4,
+        status="in_progress",
+        current_phase=phase,
+        phase_started_at=None,
+        votes_cast=0,
+        total_voters=4,
+    )
+    assert state.can_public_speak is expected
+
+
+def test_public_speech_requires_an_in_progress_game() -> None:
+    state = build_flow_state(
+        game_id=4,
+        status="finished",
+        current_phase="intro",
+        phase_started_at=None,
+        votes_cast=0,
+        total_voters=4,
+    )
+    assert state.can_public_speak is False
+
+
 def test_phase_advance_enforces_time_votes_and_single_step(
     client, db_session: Session
 ) -> None:
@@ -804,13 +845,14 @@ def test_apply_no_action_and_advisories_never_change_public_history_or_vote(
     assert get_vote_result(db_session, game["id"]).votes_cast == 0
 
 
+@pytest.mark.parametrize("phase", ["investigation_1", "discussion_1"])
 def test_apply_request_ai_speaker_generates_one_public_message_without_chain(
-    client, db_session: Session
+    client, db_session: Session, phase: str
 ) -> None:
     from app.agents.character_agent import get_character_agent
 
     game = _start_game(client, db_session)
-    _set_phase(db_session, game["id"], "discussion_1")
+    _set_phase(db_session, game["id"], phase)
     ai_character = next(
         character
         for character in _game_characters(db_session, game["id"])
@@ -831,6 +873,22 @@ def test_apply_request_ai_speaker_generates_one_public_message_without_chain(
     assert response.status_code == 200
     assert response.json()["status"] == "applied"
     assert response.json()["public_message"]["channel_type"] == "public"
+    assert len(fake_agent.calls) == 1
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                Message.game_session_id == game["id"],
+                Message.channel_type == "public",
+            )
+        )
+        == 1
+    )
+    duplicate = client.post(
+        f"/api/games/{game['id']}/director/recommendations/{record.id}/apply"
+    )
+    assert duplicate.status_code == 409
     assert len(fake_agent.calls) == 1
     assert (
         db_session.scalar(
@@ -879,9 +937,11 @@ def test_apply_rejects_human_speaker_and_too_early_phase_advance(
     rejected_speaker = client.post(
         f"/api/games/{game['id']}/director/recommendations/{human_speaker.id}/apply"
     )
+    _set_phase(db_session, game["id"], "vote")
     rejected_phase_speaker = client.post(
         f"/api/games/{game['id']}/director/recommendations/{wrong_phase_speaker.id}/apply"
     )
+    _set_phase(db_session, game["id"], "intro")
     rejected_phase = client.post(
         f"/api/games/{game['id']}/director/recommendations/{phase_advance.id}/apply"
     )
@@ -890,6 +950,87 @@ def test_apply_rejects_human_speaker_and_too_early_phase_advance(
     assert rejected_phase.json()["status"] == "rejected"
     assert db_session.get(GameSession, game["id"]).current_phase == "intro"
     assert fake_agent.calls == []
+
+
+@pytest.mark.parametrize("phase", ["vote", "ending"])
+def test_director_speaker_is_rejected_when_public_speech_is_not_allowed(
+    client, db_session: Session, phase: str
+) -> None:
+    from app.agents.character_agent import get_character_agent
+
+    game = _start_game(client, db_session)
+    _set_phase(db_session, game["id"], phase)
+    ai_character = next(
+        character
+        for character in _game_characters(db_session, game["id"])
+        if character.controller_type == "ai"
+    )
+    recommendation = _save_recommendation(
+        db_session,
+        game["id"],
+        DirectorAction.request_ai_speaker,
+        target_game_character_id=ai_character.id,
+    )
+    fake_agent = FakeCharacterAgent()
+    client.app.dependency_overrides[get_character_agent] = lambda: fake_agent
+
+    response = client.post(
+        f"/api/games/{game['id']}/director/recommendations/{recommendation.id}/apply"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+    assert fake_agent.calls == []
+    assert db_session.get(DirectorRecommendationRecord, recommendation.id).status == (
+        "rejected"
+    )
+
+
+@pytest.mark.parametrize("status", ["applying", "applied", "rejected", "advisory"])
+def test_director_apply_rejects_non_pending_recommendations_without_side_effects(
+    client, db_session: Session, status: str
+) -> None:
+    from app.agents.character_agent import get_character_agent
+
+    game = _start_game(client, db_session)
+    _set_phase(db_session, game["id"], "discussion_1")
+    ai_character = next(
+        character
+        for character in _game_characters(db_session, game["id"])
+        if character.controller_type == "ai"
+    )
+    recommendation = _save_recommendation(
+        db_session,
+        game["id"],
+        DirectorAction.request_ai_speaker,
+        target_game_character_id=ai_character.id,
+    )
+    recommendation.status = status
+    db_session.commit()
+    fake_agent = FakeCharacterAgent()
+    client.app.dependency_overrides[get_character_agent] = lambda: fake_agent
+
+    response = client.post(
+        f"/api/games/{game['id']}/director/recommendations/{recommendation.id}/apply"
+    )
+
+    assert response.status_code == 409
+    assert status in response.json()["detail"]
+    assert fake_agent.calls == []
+    assert db_session.get(DirectorRecommendationRecord, recommendation.id).status == (
+        status
+    )
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                Message.game_session_id == game["id"],
+                Message.channel_type == "public",
+            )
+        )
+        == 0
+    )
 
 
 def test_apply_phase_advance_passes_flow_manager_when_time_is_satisfied(
@@ -914,3 +1055,20 @@ def test_apply_phase_advance_passes_flow_manager_when_time_is_satisfied(
     advanced_game = db_session.get(GameSession, game["id"])
     assert advanced_game.current_phase == "act_2"
     assert advanced_game.phase_started_at.replace(tzinfo=timezone.utc) > past
+    duplicate = client.post(
+        f"/api/games/{game['id']}/director/recommendations/{record.id}/apply"
+    )
+    assert duplicate.status_code == 409
+    assert db_session.get(GameSession, game["id"]).current_phase == "act_2"
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(
+                Message.game_session_id == game["id"],
+                Message.channel_type == "system",
+                Message.content == "进入第二幕。",
+            )
+        )
+        == 1
+    )

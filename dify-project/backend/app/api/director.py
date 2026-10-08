@@ -23,7 +23,10 @@ from app.schemas.director import (
     DirectorRecommendationRead,
 )
 from app.services.director import analyze_game_with_director
-from app.services.director_actions import apply_director_recommendation
+from app.services.director_actions import (
+    DirectorApplyConflict,
+    apply_director_recommendation,
+)
 
 router = APIRouter()
 
@@ -88,6 +91,8 @@ def apply_recommendation(
         )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except DirectorApplyConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 def _require_development() -> None:

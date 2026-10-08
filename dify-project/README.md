@@ -65,6 +65,10 @@ Director participation 的“长时间未参与”是从最近公开发言时间
 
 Director 通过独立 Dify Workflow 接收序列化后的 `director_context` JSON string，并使用 blocking `/workflows/run` 请求；输出必须符合 `DirectorRecommendation` 枚举与字段契约。Director Context 包含剧本事实、秘密、公开局势、客观线索进度与流程状态；绝不包含 Thought、inner_os、Memory、私聊或角色运行时内部认知。建议经过后端 Action Validator；Director 不能改权威状态、投票或剧本。`no_action`、合法的单角色公开发言请求和阶段推进建议可由后端规则处理；线索提示及公开事实引用先作为 advisory，不自动广播。Director 仅由 Development 调试按钮手动运行，没有自动循环。Writer Phase 尚未实现。配置与输入输出契约见 [Dify Director Workflow 配置](docs/dify-director-workflow.md)。
 
+Phase 7 Finalization 的公开发言资格由 Game Flow Manager 的 `can_public_speak` 统一决定：`intro`、`act_1`、`investigation_1`、`discussion_1`、`act_2`、`investigation_2`、`discussion_2`、`final_discussion` 允许；`vote`、`ending` 不允许。该资格同时用于 `public-turn`、Development `ai-step`、Director 的 AI 发言动作，以及玩家公开消息写入；private chat 继续使用原有规则。
+
+Director recommendation apply 使用条件更新将 `pending` 原子认领为 `applying`，完成后写入 `applied`、`rejected` 或 `advisory`。同一推荐的并发或重复 apply 返回 HTTP `409`，不会再次执行发言或推进阶段。新增 migration `20261007_phase7_atomic_apply` 扩展状态约束；升级现有数据库时，在项目根目录执行 `alembic -c backend/alembic.ini upgrade head`，不要依赖应用启动时的 `create_all` 更新旧表。
+
 ## 技术栈
 
 | 部分 | 技术 |

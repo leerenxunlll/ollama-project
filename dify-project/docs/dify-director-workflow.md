@@ -90,7 +90,9 @@ LLM 节点启用结构化输出，Workflow 的最终输出严格返回一个符�
 
 > 你是剧本杀幕后导演。依据提供的 DirectorContext 观察剧本事实、公开局势与流程状态，并只生成一个 DirectorRecommendation。你可以知道剧本真相和角色剧本秘密，但不能看到或索要角色的私聊、inner_os、Thought、Memory 或运行时私有认知。角色公开说出的谎言不会改变剧本真相。不得创造不存在的事实或线索，不得改凶手、修改历史、决定投票结果、推进阶段或直接调用角色 Agent。`request_ai_speaker`、`recommend_phase_advance` 和其他建议都只是建议；后端会独立校验。对 `suggest_clue_hint` 与 `highlight_public_fact` 只能引用输入中已有的 ID，不能编造引用。严格返回契约要求的 JSON 对象。
 
-Director 的判断只能影响建议内容。具体地，`request_ai_speaker` 需要后端确认目标是本局可发言的 AI 角色；`recommend_phase_advance` 需要 Game Flow Manager 确认状态、阶段转换、最短阶段时间和投票条件。`suggest_clue_hint` 与 `highlight_public_fact` 在当前版本保持 advisory，不自动向玩家广播，也不改写公开记录。Director 永远不能直接增删或改票，投票结果由后端确定性 tally 得出。
+Director 的判断只能影响建议内容。具体地，`request_ai_speaker` 需要后端确认目标是本局 AI 角色且 `can_public_speak` 为真；允许公开发言的阶段为 `intro`、`act_1`、`investigation_1`、`discussion_1`、`act_2`、`investigation_2`、`discussion_2` 和 `final_discussion`。`recommend_phase_advance` 需要 Game Flow Manager 确认状态、阶段转换、最短阶段时间和投票条件。`suggest_clue_hint` 与 `highlight_public_fact` 在当前版本保持 advisory，不自动向玩家广播，也不改写公开记录。Director 永远不能直接增删或改票，投票结果由后端确定性 tally 得出。
+
+后端以条件更新将 recommendation 从 `pending` 原子认领为 `applying`，再执行动作并记录最终状态。同一 recommendation 并发或重复 apply 返回 HTTP `409`，不会重复生成公开发言或推进阶段。进程若在动作完成前异常终止，记录会留在 `applying`；再次请求会返回冲突，确认实际状态前不要手动改回 `pending`。
 
 ## 本地开发与验证
 
