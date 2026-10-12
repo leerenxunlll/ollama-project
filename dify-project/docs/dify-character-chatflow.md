@@ -25,6 +25,24 @@ Phase 5 将 Character Chatflow 的输出从单独台词升级为结构化 JSON�
 
 三个模式仍使用同一个 Phase 5 Structured Output。模式不改变 Schema，也不授权角色访问额外信息；角色只能依据后端提供的 `character_context`、`interaction_context` 和本次输入生成回复。`inner_os` 与 `memory_updates` 仍由后端校验并按 Phase 5 规则处理，不作为普通公开消息展示。
 
+## Phase 8A 角色剧本知识
+
+Phase 8A 仍使用现有 Character Chatflow，不创建新 Dify App。后端传入的 `character_context.shared_script_chapters` 是本角色当前阶段已解锁的公共叙事；`character_context.character_script_chapters` 是当前角色模板自己的已解锁私人剧本。章节项提供 `chapter_id`、`chapter_order`、`unlock_phase`、`title` 和 `content`。这些章节是预先写好的背景经历，不是本轮聊天记录。
+
+按 `character_context.game.current_phase` 理解当前剧情阶段。游戏准备就绪时只会收到 intro；进入 `act_1`、`act_2` 后，后端才会逐步加入相应章节，并保留已解锁的旧章节。Dify 只能使用输入中实际出现的章节内容，不能假设未来章节、其他角色私人章节或 Director 才能看到的完整案件真相。角色可以基于自己的秘密选择隐瞒、回避或撒谎，但不能因此获得未提供的知识，也不能把推测说成已确认的正式线索。
+
+这几种信息不能互相替代：
+
+| 输入信息 | 含义 | 使用方式 |
+| --- | --- | --- |
+| `shared_script_chapters` | 随剧情阶段逐步开放给全员的预设公共故事 | 作为所有角色共享的经历背景 |
+| `character_script_chapters` | 预设给当前角色的经历、秘密和阶段目标 | 作为该角色独有的背景知识；不得转发其他角色 Context 内容，因为它不会被提供 |
+| `memories` | 角色在本局互动中形成的主观记忆 | 可能有误，应视为角色的看法，不等于案件真相 |
+| `inner_os` / Thought | 某次 AI 回复的短暂私有内心独白 | 当前仍不自动注入后续 Context；不得伪装成公开对话 |
+| `known_clues` | 后端搜证后正式授予该角色的线索 | 只代表已获得线索；阅读故事章节不会自动增加它 |
+
+权限由 FastAPI 的 CharacterContextBuilder 实施，而不是依赖本节提示词。Director 使用独立的 DirectorContext，可获知全部预设章节与剧本真相；Character Chatflow 不会收到 DirectorContext，也不会因为复用同一个 Dify 应用而继承 Director 权限。Memory 与 Thought 仍不会加入 DirectorContext。
+
 如果当前模型不支持 Dify 的 Structured Output，建议在 Dify 中选择支持该功能的模型。也可以先用提示词要求输出该格式，但后端仍会严格校验；格式错误时本轮不会写入数据库。
 
 ## Structured Output Schema
@@ -130,6 +148,8 @@ Answer 示例（Answer 内容只返回 JSON 本身）：
 5. memory_updates 只记录会影响未来行为的重要信息，例如玩家透露的重要事实、形成的怀疑、承诺或重要关系变化。不要记录每句话；没有重要内容时返回空数组。
 6. 不得创造、宣布或授予正式线索，不得改变案件真相、GameSession 状态或当前阶段。
 7. 不得输出 Markdown、code fence、前言、解释或 Schema 外的字段。
+8. 将已解锁章节当作预设经历；Memory 是角色在本局形成的主观看法，不能据此改写章节或案件真相。
+9. 不得声称知道当前 `character_context` 中没有提供的未来章节、其他角色私人经历或 Director 专属真相。
 ```
 
 ## 后端请求与校验边界

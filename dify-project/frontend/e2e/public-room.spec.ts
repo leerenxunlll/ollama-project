@@ -21,10 +21,28 @@ test('shows public turns, partial failures, and one proactive AI step', async ({
   }
   expect(createGameResponse.status()).toBe(201)
 
-  await request.post(`/api/games/${created.id}/select-character`, {
-    data: { game_character_id: created.game_characters[0].id },
-  })
-  await request.post(`/api/games/${created.id}/start`)
+  const selectResponse = await request.post(
+    `/api/games/${created.id}/select-character`,
+    {
+      data: { game_character_id: created.game_characters[0].id },
+    },
+  )
+  expect(selectResponse.ok()).toBeTruthy()
+
+  const storyResponse = await request.get(`/api/games/${created.id}/me/story`)
+  expect(storyResponse.ok()).toBeTruthy()
+  const chapters = (await storyResponse.json()) as Array<{
+    unlock_phase: string
+  }>
+  if (chapters.some((chapter) => chapter.unlock_phase === 'intro')) {
+    const acknowledgementResponse = await request.post(
+      `/api/games/${created.id}/me/acknowledge-intro`,
+    )
+    expect(acknowledgementResponse.ok()).toBeTruthy()
+  }
+
+  const startResponse = await request.post(`/api/games/${created.id}/start`)
+  expect(startResponse.ok()).toBeTruthy()
 
   const gameResponse = await request.get(`/api/games/${created.id}`)
   const game = (await gameResponse.json()) as {

@@ -12,7 +12,9 @@ flowchart LR
     Agents[Agent 层<br/>AI 推理与生成]
     CharacterDify[Dify Character Chatflow]
     DirectorDify[Dify Director Workflow]
+    WriterDify[Dify Writer Workflow]
     Director[Director Agent<br/>建议]
+    Writer[Writer Agent<br/>待校验草稿]
     Database[(SQLite<br/>数据持久化)]
 
     Frontend -->|HTTP| Backend
@@ -27,9 +29,12 @@ flowchart LR
     Backend -->|构造独立 DirectorContext| Director
     Director -->|结构化建议| DirectorDify
     Director -->|recommendation| Backend
+    Backend -->|构造受限 Draft payload| Writer
+    Writer -->|结构化草稿| WriterDify
+    WriterDify -->|WriterBlueprint / ChapterPack| Backend
 ```
 
-Phase 3 建立固定阶段转换图、角色搜证与消息 API。Phase 4–5 建立 Character Agent 私聊及结构化状态/记忆。Phase 6 由 Speaker Scheduler 按确定性规则选择公开发言者。Phase 7 增加 Game Flow Manager、阶段计时、确定性投票和独立 Director Workflow；AI 建议仍须经后端规则校验。
+Phase 3 建立固定阶段转换图、角色搜证与消息 API。Phase 4–5 建立 Character Agent 私聊及结构化状态/记忆。Phase 6 由 Speaker Scheduler 按确定性规则选择公开发言者。Phase 7 增加 Game Flow Manager、阶段计时、确定性投票和独立 Director Workflow；Phase 8B 增加只保存未发布草稿的 Writer Workflow。
 
 ## 职责边界
 
@@ -42,8 +47,9 @@ Phase 3 建立固定阶段转换图、角色搜证与消息 API。Phase 4–5 �
 - **Speaker Scheduler** 位于 `backend/app/game/speaker_scheduler.py`，负责对话内的角色发言调度，例如点名匹配、round-robin 与 reaction responder。它与 phase progression、timing 和 vote 是不同领域。
 - **Character Agent** 负责单个角色推理与生成，经 Schema 验证返回 speech、inner_os、emotion、intent 和 memory updates；AI 不允许直接修改核心游戏状态。
 - **Director Agent** 观察受限的导演视角并生成有限的 `DirectorRecommendation`。它既不是 Game Flow Manager，也不是 Speaker Scheduler；Director 不能写权威状态、改票、推进阶段或直接调用 Character Agent。
+- **Writer Agent** 根据明确创作请求生成待验证的 Script Draft。它不能发布正式 Script、改写已存在剧本或修改运行中游戏；输出先经 Schema 和确定性结构检查。
 - **Database** 使用 SQLite 持久化脚本模板与游戏运行数据。SQLAlchemy 模型表达真相；Alembic 负责后续表结构迁移，`create_all` 只创建缺失表。
-- **Dify Character Chatflow** 生成角色台词；**Dify Director Workflow** 生成导演建议。两者使用独立 App Key 和 Context，均不持有权威游戏状态。
+- **Dify Character Chatflow** 生成角色台词；**Dify Director Workflow** 生成导演建议；**Dify Writer Workflow** 生成待校验草稿。三个 Dify App 使用独立 Key 和各自的 Context，均不持有权威游戏状态。
 
 ## Multi-Agent Orchestration
 
@@ -72,7 +78,7 @@ sequenceDiagram
 
 `POST /api/games/{game_id}/public-turn` 接受 `{ "content": "..." }`，响应含 `human_message`、`ai_responses`、`status`（`completed` 或 `partial`）和 `failures`。`partial` 用于 CharacterAgent/Dify 调用、输出校验或角色回复原子保存失败；Context 构造等未捕获服务错误仍可能返回 HTTP 500。`POST /api/games/{game_id}/ai-step` 仅在 `APP_ENV=development` 开放，用 `proactive_public` 模式触发单个 AI 角色，并返回 `ai_message`。主动 step 使用的 synthetic trigger 是后端编排信号，不是玩家发言，不创建 `Message`。公开消息仍由后端作为实际消息写入；Dify 只生成结构化角色回复，不直接写数据库。
 
-Speaker Scheduler 负责确定性 speaker scheduling；Character Agent 负责单个角色推理与生成；Director 观察整体叙事节奏并提出 recommendation。三者职责不同。Phase 7 的 Director 通过独立 Workflow 调用；Writer AI 尚未实现，Director 不生成或修改剧本。
+Speaker Scheduler 负责确定性 speaker scheduling；Character Agent 负责单个角色推理与生成；Director 观察整体叙事节奏并提出 recommendation；Writer 生成尚未发布的剧本草稿。四者职责不同。Director 不生成或修改剧本，也不读取 Writer Draft。
 
 ## Multi-Agent Failure Semantics
 
@@ -152,15 +158,56 @@ stateDiagram-v2
 
 | 信息范围 | 当前数据示例 | 预期接收者 |
 | --- | --- | --- |
-| Public Information | Script 的公开元数据、Character 的 `public_background`、已公开线索、公共消息 | 玩家与所有角色 |
-| Private Character Information | Character 的 `private_background`、个人目标、私聊消息及接收对象 | 对应角色或明确获准的接收者 |
+| Public Information | Script 的公开元数据、Character 的 `public_background`、已解锁的 `SharedScriptChapter`、已公开线索、公共消息 | 玩家与所有角色 |
+| Private Character Information | Character 的 `private_background`、个人目标、对应角色的 `CharacterScriptChapter`、私聊消息及接收对象 | 对应角色或明确获准的接收者 |
 | God/Director Information | `is_killer`、角色剧本秘密、核心线索及全局裁定事实 | Game Engine 与 Director；普通角色不接收完整内容 |
 
 当前基础 API 的 `GET /api/scripts` 和 `GET /api/scripts/{script_id}` 只返回 Script 元数据；`GET /api/games/{game_id}` 只返回运行状态、角色姓名和控制类型，不返回角色私密背景、凶手标记、角色运行目标或随机种子。数据库模型中存在更完整的数据，不代表这些字段可以默认向浏览器或角色开放。
 
+私有角色信息还包括 personal_history、relationship_to_victim、pre_case_experience、private_secrets 和 initial_knowledge；这些字段只能加入对应角色的 CharacterContext。God/Director 信息还包括案件真相、规范时间线及 Draft key 到正式数据库 ID 的映射。
+
 普通 Character Agent 不应接收到完整 Script 真相。权限隔离由后端过滤并构造 Context 实现，而不是依靠 Prompt 要求模型保密。
 
-本阶段没有定义完整案件真相的数据格式，因此没有额外加入 truth JSON 字段。等剧本真相的稳定结构确定后，再决定是否使用单个 JSON 字段或独立模型。
+Phase 8C 将完整案件真相、真实时间线、role_key 到 Character ID、clue_key 到 Clue ID 与线索事件关联保存到独立 ScriptCanonicalData。该表只由 Publisher 写入，DirectorContextBuilder 专门读取；CharacterContextBuilder 不查询它，普通 Script/Game API 也不序列化它。
+
+## Script Chapters 与分幕知识权限
+
+Phase 8A 将预设叙事章节与案件真相、运行时认知和正式线索分开保存：
+
+| 数据 | 职责 | 读取范围 |
+| --- | --- | --- |
+| Script Truth | 现有 Script、Character 的权威设定与凶手标记，以及 Clue 定义 | Game Engine；Director 可见完整内容 |
+| `SharedScriptChapter` | 某个 Script 在 `intro`、`act_1` 或 `act_2` 开放的公共叙事 | 玩家与角色仅可读当前已解锁章节；Director 可读全部章节 |
+| `CharacterScriptChapter` | 属于一个 Script Character 的预设经历、隐瞒和阶段目标 | 真人与对应 AI 角色只可读自己的已解锁章节；Director 可读全部角色章节 |
+| `CharacterMemory` | 单局角色在互动中形成的主观认知，可能正确也可能错误 | 仅该 GameCharacter 的后续 Character Context |
+| `CharacterThought` | 一次 AI 回复的私有 `inner_os`、emotion 与 intent | 仅后端及开发专用 Inspector，不进入 Character/Director Context |
+| `GameCharacterClue` | 经搜证规则明确授予某个运行角色的正式线索 | 仅获授线索的角色 Context；阅读章节不会创建或授予线索 |
+
+公共章节通过 `SharedScriptChapter.script_id` 归属 Script；私人章节通过 `CharacterScriptChapter.character_id` 归属角色模板。它们是可复用的剧本内容，不存放在 GameCharacter、Memory、Thought 或 Message 中。同一个 Script 开启多局时，各局共享模板章节，但 Memory、Thought、线索获取和序章确认仍按 GameSession 隔离。
+
+`CharacterContext.shared_script_chapters` 只包含当前已解锁的公共章节；`character_script_chapters` 只包含当前 GameCharacter 所关联模板角色的已解锁私人章节。每项包含章节 ID、顺序、解锁阶段、标题和正文。Builder 根据游戏所属 Script 和当前角色的 Character 关联取数，不接受另一个角色 ID 来扩大权限。CharacterAgent 继续只接收通过 Pydantic 验证的角色专属 Context。
+
+Director 的 `DirectorScriptContext` 包含该 Script 的全部 `shared_script_chapters` 与全部角色的 `character_script_chapters`；每条 Director 私人章节另外带有 `character_id` 以保留所有权。该扩展不把 `CharacterMemory`、`CharacterThought`、inner_os、private Message 或 `current_emotion` 加入 Director Context。两类 Builder 保持分开，Character Context 不提供 `god_mode`。
+
+章节解锁仅接受 `intro`、`act_1`、`act_2` 三个节点，并按 `state_machine.py` 的 `PHASE_SEQUENCE` 判断先后，不比较阶段字符串。游戏 `ready` 且真人角色已选定时，玩家只能读取公共与本人私人 `intro`；进入 `act_1` 后保留 intro 并开放第一幕；进入 `act_2` 后保留此前章节并开放第二幕。更晚阶段仍保留所有已解锁章节。尚未选择角色的游戏不能通过玩家章节 API 暴露剧情正文。
+
+对于含有本人私人 intro 的 Script，GameSession 保存自己的确认时间；真人确认阅读后才能开始游戏。没有私人 intro 的 Phase 0–7 旧 Script 不要求额外确认。确认是本地单人开发模式的流程记录，不证明逐字阅读，也不是用户身份认证。
+
+```mermaid
+flowchart LR
+    Script[Script template] --> Shared[SharedScriptChapter]
+    Character[Character template] --> Private[CharacterScriptChapter]
+    Shared --> Unlock[Phase order + backend permission filter]
+    Private --> Unlock
+    Unlock --> Player[Public story / own story API]
+    Unlock --> CharacterContext[CharacterContext: own unlocked chapters]
+    Shared --> DirectorContext[DirectorContext: all shared chapters]
+    Private --> DirectorContext[DirectorContext: all private chapters + owner ID]
+    CharacterContext --> Agent[Character Agent]
+    DirectorContext --> Director[Director Agent]
+```
+
+真人章节 API 依据 GameSession 中唯一 `controller_type=human` 识别角色，不接收调用方提供的 `character_id`。当前没有正式玩家认证，这是本地单人 Development 模式约定；公开部署前必须由真实身份认证和授权替代，不能把 GameSession ID 当作身份凭据。
 
 ## Director Information Boundary
 
@@ -174,7 +221,22 @@ Director 使用独立的 `DirectorContext` builder/schema，不复用 `Character
 | 最近最多 50 条 public/system 消息与公开语音内容 | 角色运行时推理、`current_emotion`、`intent`、Character Agent 原始结构化输出或 Dify prompt 历史 |
 | 由后端统计的各角色公开发言次数与最近公开发言时间；最近发言达到 120 秒时标记 inactive | 由某角色私密 Context、Thought 或 Memory 推导的参与度 |
 
-Director 不用角色 Memory 代替事件摘要。只有当前已有的 Script 权威字段进入 Context；当前没有 canonical truth/timeline 字段时，不临时创建万能 JSON，Writer Phase 再设计正式的剧本真相结构。Director Context 不返回给浏览器，日志也不应记录完整 Context。
+Director 不用角色 Memory 代替事件摘要。当前正式 Script 尚无 canonical truth/timeline 字段；Phase 8B 生成的真相与时间线只保存在独立 Draft，不会被 Director Context 读取。Writer Draft 发布前的真相结构不是正式 Script 权威字段。Director Context 不返回给浏览器，日志也不应记录完整 Context。
+
+## Writer Draft Boundary
+
+Writer 生成的案件蓝图、凶手角色、真实时间线、角色秘密与章节正文保存在独立 `ScriptDraft` 中。Draft 记录的是未发布、尚未完成深层一致性审核的候选内容，不属于正式 `Script`、`Character`、`Clue` 或 Phase 8A 章节表。
+
+| 数据 | Writer 可见 | Character/Director 可见 | 当前权威性 |
+| --- | --- | --- | --- |
+| `generation_request_json` | 是 | 否 | 用户创作素材，不是游戏状态 |
+| `blueprint_json` | 生成后用于续写 | 否 | 待审草稿，包括 draft 内 culprit 与 timeline |
+| `chapter_packs_json` | 后续阶段用于连续性 | 否 | 未发布章节草稿 |
+| Script / GameSession | 不读取现有运行状态 | 按已有 Context 边界读取 | 由 Game Engine 和正式数据库管理 |
+
+只有 development-only Writer Draft API 和显式标记 **DEVELOPMENT ONLY / SPOILERS** 的 Development 预览可以查看草稿秘密。普通游戏 API、CharacterContext、DirectorContext 不包含 Draft；Writer 也不接收 `CharacterMemory`、`CharacterThought` 或 private Message。Dify 原始输出必须通过严格 Pydantic Schema 和确定性数量、唯一性、枚举及引用校验后才可写入 Draft。JSON 结构校验不代表剧情逻辑没有矛盾；Phase 8C 的独立 Quality Workflow 执行一致性审查，人工批准后才允许发布。
+
+四个生成步骤分别原子认领和保存：Blueprint、Intro、Act 1、Act 2。条件更新避免同一 Draft 同一步并发覆盖；认领事务在请求 Dify 前提交。失败保留已保存步骤，状态记载失败类别和步骤；进程中断留下的 generation lease 超过 10 分钟后可由同一步重新认领。没有后台任务系统或无限自动重试。
 
 ```mermaid
 flowchart LR
@@ -194,6 +256,31 @@ Director Workflow 输入为 `director_context` JSON string，经 blocking `/work
 `no_action` 是无副作用成功。`request_ai_speaker` 只有在目标是当前局可发言 AI 且 phase 允许公开发言时，才由后端经 Speaker Scheduler 触发一次 `proactive_public`；不链式触发其他 Agent。`recommend_phase_advance` 交给 Flow Manager 与 State Machine 重新校验 lifecycle、phase timing 和 voting requirements。`suggest_clue_hint` 和 `highlight_public_fact` 只验证引用线索/消息属于当前剧本/游戏，再保存为 advisory，不广播线索或改写消息。无效建议标记 rejected，所有状态修改仍由后端确定性服务执行。
 
 Director 是推荐者，不是 command executor。它不能创建或改变 Vote、决定 tally/tie winner、写阶段状态、变更凶手或改写 Script。Speaker Scheduler 管谁接下来发言；Game Flow Manager 管现在流程是否允许动作；这两个后端确定性领域服务不会把决定权交给 Director。
+
+## Phase 8C Quality Review 与 Script Publication
+
+~~~mermaid
+flowchart LR
+    Draft[ScriptDraft + revision] --> Validate[Deterministic full-draft validation]
+    Validate -->|valid complete input| Quality[Dify Script Quality Workflow]
+    Quality --> Report[Strict ScriptReviewReport]
+    Report --> Review[Human review and explicit approval]
+    Review --> Publish[Atomic Script Publisher]
+    Publish --> Tables[Script + Character + Clue + 15 chapters + Canonical Data]
+    Tables --> Ready[Script status ready]
+~~~
+
+Quality Workflow 的 review 只分析完整 Draft，不能执行修订或写数据库；revise_chapter_pack 只返回 Phase 8B WriterChapterPack，Backend 限定一个 phase 并以 optimistic compare-and-set 更新 Draft。每个 phase 最多两次自动修订；Blueprint、case truth、timeline、角色和线索都不接受自动改写。Quality client 只读独立 DIFY_SCRIPT_QUALITY_API_KEY，不会回退其他 Dify Key。
+
+每条 ScriptReviewRun 绑定 content_revision。修订原子保存 before/after 历史并增加 revision，旧 Review 与 Approval 因版本不匹配失效。Critical/high issues 阻止批准；medium issue 必须逐项被人工明确接受；low issue 可以保留。批准与发布是两次分离的 Development 操作。
+
+Publisher 在单个 SQLite 事务内通过 conditional update claim Draft，再创建一个 Script、四个 Character、线索、三条 SharedScriptChapter、十二条 CharacterScriptChapter 与一条 ScriptCanonicalData。Script 仅在事务内全部创建完成后改为 ready；Draft 通过唯一 published_script_id 保证重复请求返回相同 Script。事务失败时整笔回滚。
+
+Character 的扩展预设字段按角色单独保存，并只加入该角色自己的 CharacterContext；人类角色卡也只返回本局 human 对应模板的扩展资料。ScriptCanonicalData 的真相、时间线和 ID 映射只进 Director 专用 Context，Director Context 继续过滤 private Message、CharacterMemory、CharacterThought 与 inner_os。
+
+Review、Revision、Draft 内容、审批和发布 API 都只在 APP_ENV=development 开放。当前项目尚无玩家身份认证；公开部署前必须补充用户身份与权限控制，不能把 Development 服务直接暴露为公网审核入口。
+
+Quality Workflow 的 Dify 节点、完整 Schema、Prompts、HTTP 契约和 smoke 步骤见 [Dify Script Quality Workflow 配置](dify-script-quality-workflow.md)。
 
 ## AI Integration Boundary
 

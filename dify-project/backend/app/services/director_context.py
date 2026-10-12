@@ -6,8 +6,19 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.game.state_machine import INVESTIGATION_ACTS
-from app.models import GameCharacter, GameCharacterClue, GameSession, Message, Script
+from app.models import (
+    Character,
+    CharacterScriptChapter,
+    GameCharacter,
+    GameCharacterClue,
+    GameSession,
+    Message,
+    Script,
+    ScriptCanonicalData,
+    SharedScriptChapter,
+)
 from app.schemas.director import (
+    DirectorCharacterChapterFact,
     DirectorCharacterFact,
     DirectorClueFact,
     DirectorClueProgress,
@@ -16,6 +27,7 @@ from app.schemas.director import (
     DirectorPublicMessage,
     DirectorPublicState,
     DirectorScriptContext,
+    DirectorSharedChapterFact,
     DirectorVotingState,
 )
 from app.services.game_flow import get_game_flow_state, get_vote_result
@@ -38,6 +50,7 @@ def build_director_context(
     )
     if script is None:
         raise LookupError("Script not found")
+    canonical_data = db.get(ScriptCanonicalData, script.id)
 
     characters = list(
         db.scalars(
@@ -101,6 +114,21 @@ def build_director_context(
         )
         for clue in sorted(script.clues, key=lambda item: item.id)
     ]
+    shared_chapters = db.scalars(
+        select(SharedScriptChapter)
+        .where(SharedScriptChapter.script_id == script.id)
+        .order_by(SharedScriptChapter.chapter_order, SharedScriptChapter.id)
+    ).all()
+    character_chapters = db.scalars(
+        select(CharacterScriptChapter)
+        .join(Character, Character.id == CharacterScriptChapter.character_id)
+        .where(Character.script_id == script.id)
+        .order_by(
+            CharacterScriptChapter.character_id,
+            CharacterScriptChapter.chapter_order,
+            CharacterScriptChapter.id,
+        )
+    ).all()
     clue_progress = [
         DirectorClueProgress(
             clue_id=clue.id,
@@ -178,11 +206,54 @@ def build_director_context(
                 ),
                 None,
             ),
+            case_truth=(
+                canonical_data.case_truth_json if canonical_data is not None else {}
+            ),
+            canonical_timeline=(
+                canonical_data.timeline_json if canonical_data is not None else []
+            ),
             characters=[
-                DirectorCharacterFact.model_validate(character)
+                DirectorCharacterFact(
+                    id=character.id,
+                    name=character.name,
+                    age=character.age,
+                    identity=character.identity,
+                    public_background=character.public_background,
+                    private_background=character.private_background,
+                    personality=character.personality,
+                    speaking_style=character.speaking_style,
+                    personal_goal=character.personal_goal,
+                    is_killer=character.is_killer,
+                    personal_history=character.personal_history,
+                    relationship_to_victim=character.relationship_to_victim,
+                    pre_case_experience=character.pre_case_experience,
+                    private_secrets=character.private_secrets_json or [],
+                    initial_knowledge=character.initial_knowledge_json or [],
+                )
                 for character in sorted(script.characters, key=lambda item: item.id)
             ],
             clues=clue_facts,
+            shared_script_chapters=[
+                DirectorSharedChapterFact(
+                    chapter_id=chapter.id,
+                    chapter_order=chapter.chapter_order,
+                    unlock_phase=chapter.unlock_phase,
+                    title=chapter.title,
+                    content=chapter.content,
+                )
+                for chapter in shared_chapters
+            ],
+            character_script_chapters=[
+                DirectorCharacterChapterFact(
+                    chapter_id=chapter.id,
+                    character_id=chapter.character_id,
+                    chapter_order=chapter.chapter_order,
+                    unlock_phase=chapter.unlock_phase,
+                    title=chapter.title,
+                    content=chapter.content,
+                )
+                for chapter in character_chapters
+            ],
         ),
         game_flow=get_game_flow_state(db, game.id, now=now),
         voting_state=DirectorVotingState(

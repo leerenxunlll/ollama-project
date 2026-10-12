@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.ai import CharacterEmotion
 
@@ -36,6 +36,11 @@ class ContextCharacter(BaseModel):
     personality: str
     speaking_style: str
     personal_goal: str
+    personal_history: str | None = None
+    relationship_to_victim: str | None = None
+    pre_case_experience: str | None = None
+    private_secrets: list[str] = Field(default_factory=list)
+    initial_knowledge: list[str] = Field(default_factory=list)
     current_emotion: CharacterEmotion | None
     current_goal: str | None
 
@@ -74,6 +79,16 @@ class ContextClue(BaseModel):
     source: str | None
 
 
+class ContextScriptChapter(BaseModel):
+    """One prewritten chapter currently unlocked for this character."""
+
+    chapter_id: int
+    chapter_order: int
+    unlock_phase: Literal["intro", "act_1", "act_2"]
+    title: str
+    content: str
+
+
 class CharacterContext(BaseModel):
     """Complete, permission-filtered input for one future Character Agent."""
 
@@ -84,6 +99,8 @@ class CharacterContext(BaseModel):
     private_messages: list[ContextMessage]
     known_clues: list[ContextClue]
     memories: list[ContextMemory]
+    shared_script_chapters: list[ContextScriptChapter]
+    character_script_chapters: list[ContextScriptChapter]
 
 
 class DirectorCharacterContext(BaseModel):

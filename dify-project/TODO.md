@@ -12,3 +12,7 @@
 - [x] Phase 6：验证公开回合与私聊各自的持久化和失败语义
 - [x] Phase 7：Game Flow、Vote、Director Context 与 Director Workflow
 - [x] Phase 7 Finalization：atomic apply、统一公开发言资格、真实 Director Dify smoke 与完整回归
+- [x] Phase 8A：公共与私人剧本章节、阶段解锁、阅读确认及知识权限
+- [x] Phase 8B：Writer Draft、Mock 回归与真实 Writer Dify 四步 smoke 完成
+- [ ] Phase 8C Finalization：配置独立 Quality Dify Key，完成真实 Review/Revision smoke 与 Draft→Script→GameSession 联调
+- [x] Development 游戏局列表默认显示最近 10 局，并支持展开历史

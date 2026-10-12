@@ -36,6 +36,8 @@ def _select_human(client, game: dict, character_index: int = 0) -> dict:
 def _start_game(client, db_session: Session) -> tuple[dict, dict]:
     game = _create_game(client, db_session)
     _select_human(client, game)
+    acknowledged = client.post(f"/api/games/{game['id']}/me/acknowledge-intro")
+    assert acknowledged.status_code == 200
     response = client.post(f"/api/games/{game['id']}/start")
     assert response.status_code == 200
     return game, response.json()
@@ -83,6 +85,8 @@ def test_start_requires_ready_game_and_sets_initial_state(
     assert rejected.status_code == 409
 
     ready_game = _select_human(client, waiting_game)
+    acknowledged = client.post(f"/api/games/{ready_game['id']}/me/acknowledge-intro")
+    assert acknowledged.status_code == 200
     started = client.post(f"/api/games/{ready_game['id']}/start")
 
     assert started.status_code == 200
@@ -194,6 +198,8 @@ def test_act_one_search_grants_clue_and_context_only_to_searching_character(
 ) -> None:
     game = _create_game(client, db_session)
     _select_human(client, game)
+    acknowledged = client.post(f"/api/games/{game['id']}/me/acknowledge-intro")
+    assert acknowledged.status_code == 200
     _start = client.post(f"/api/games/{game['id']}/start")
     assert _start.status_code == 200
     _advance_to(client, db_session, game["id"], "investigation_1")
@@ -389,6 +395,8 @@ def test_player_message_api_enforces_public_private_and_session_boundaries(
         json={"game_character_id": first_game["game_characters"][0]["id"]},
     )
     assert selected.status_code == 200
+    acknowledged = client.post(f"/api/games/{first_game['id']}/me/acknowledge-intro")
+    assert acknowledged.status_code == 200
     started = client.post(f"/api/games/{first_game['id']}/start")
     assert started.status_code == 200
     sender_id = first_game["game_characters"][0]["id"]

@@ -3,13 +3,17 @@
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
+from app.game.state_machine import unlocked_script_chapter_phases
 from app.models import (
+    Character,
     CharacterMemory,
+    CharacterScriptChapter,
     Clue,
     GameCharacter,
     GameCharacterClue,
     GameSession,
     Message,
+    SharedScriptChapter,
 )
 from app.schemas.context import (
     CharacterContext,
@@ -19,6 +23,7 @@ from app.schemas.context import (
     ContextMemory,
     ContextMessage,
     ContextOtherCharacter,
+    ContextScriptChapter,
 )
 
 MESSAGE_CONTEXT_LIMIT = 20
@@ -47,6 +52,8 @@ def build_character_context(
     )
     if current_character is None:
         raise LookupError("Character not found in this game")
+    if current_character.character.script_id != game.script_id:
+        raise LookupError("Character template does not belong to this script")
 
     sender_character = aliased(GameCharacter)
     receiver_character = aliased(GameCharacter)
@@ -131,6 +138,25 @@ def build_character_context(
             .limit(MEMORY_CONTEXT_LIMIT)
         ).all()
     )
+    unlocked_phases = unlocked_script_chapter_phases(game.status, game.current_phase)
+    shared_script_chapters = db.scalars(
+        select(SharedScriptChapter)
+        .where(
+            SharedScriptChapter.script_id == game.script_id,
+            SharedScriptChapter.unlock_phase.in_(unlocked_phases),
+        )
+        .order_by(SharedScriptChapter.chapter_order, SharedScriptChapter.id)
+    ).all()
+    character_script_chapters = db.scalars(
+        select(CharacterScriptChapter)
+        .join(Character, Character.id == CharacterScriptChapter.character_id)
+        .where(
+            Character.script_id == game.script_id,
+            CharacterScriptChapter.character_id == current_character.character_id,
+            CharacterScriptChapter.unlock_phase.in_(unlocked_phases),
+        )
+        .order_by(CharacterScriptChapter.chapter_order, CharacterScriptChapter.id)
+    ).all()
 
     character_template = current_character.character
     return CharacterContext(
@@ -149,6 +175,11 @@ def build_character_context(
             personality=character_template.personality,
             speaking_style=character_template.speaking_style,
             personal_goal=character_template.personal_goal,
+            personal_history=character_template.personal_history,
+            relationship_to_victim=character_template.relationship_to_victim,
+            pre_case_experience=character_template.pre_case_experience,
+            private_secrets=character_template.private_secrets_json or [],
+            initial_knowledge=character_template.initial_knowledge_json or [],
             current_emotion=current_character.current_emotion,
             current_goal=current_character.current_goal,
         ),
@@ -186,6 +217,12 @@ def build_character_context(
             )
             for memory in memories
         ],
+        shared_script_chapters=[
+            _context_script_chapter(chapter) for chapter in shared_script_chapters
+        ],
+        character_script_chapters=[
+            _context_script_chapter(chapter) for chapter in character_script_chapters
+        ],
     )
 
 
@@ -198,4 +235,17 @@ def _context_message(message: Message) -> ContextMessage:
         receiver_game_character_id=message.receiver_game_character_id,
         content=message.content,
         created_at=message.created_at,
+    )
+
+
+def _context_script_chapter(
+    chapter: SharedScriptChapter | CharacterScriptChapter,
+) -> ContextScriptChapter:
+    """Copy the complete allowed story chapter into the agent schema."""
+    return ContextScriptChapter(
+        chapter_id=chapter.id,
+        chapter_order=chapter.chapter_order,
+        unlock_phase=chapter.unlock_phase,
+        title=chapter.title,
+        content=chapter.content,
     )

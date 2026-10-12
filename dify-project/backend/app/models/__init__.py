@@ -10,11 +10,20 @@ from app.models.game import (
     Message,
     Vote,
 )
-from app.models.script import Character, Clue, Script
+from app.models.script import (
+    Character,
+    CharacterScriptChapter,
+    Clue,
+    Script,
+    ScriptCanonicalData,
+    SharedScriptChapter,
+)
+from app.models.writer import ScriptDraft, ScriptReviewRun, ScriptRevisionRecord
 
 __all__ = [
     "Character",
     "CharacterMemory",
+    "CharacterScriptChapter",
     "CharacterThought",
     "Clue",
     "DirectorRecommendationRecord",
@@ -23,5 +32,10 @@ __all__ = [
     "GameSession",
     "Message",
     "Script",
+    "ScriptCanonicalData",
+    "ScriptDraft",
+    "ScriptReviewRun",
+    "ScriptRevisionRecord",
+    "SharedScriptChapter",
     "Vote",
 ]

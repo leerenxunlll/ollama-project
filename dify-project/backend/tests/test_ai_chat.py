@@ -95,6 +95,8 @@ def _start_game(client, game: dict) -> dict:
         json={"game_character_id": human_id},
     )
     assert response.status_code == 200
+    acknowledged = client.post(f"/api/games/{game['id']}/me/acknowledge-intro")
+    assert acknowledged.status_code == 200
     response = client.post(f"/api/games/{game['id']}/start")
     assert response.status_code == 200
     return response.json()
@@ -178,6 +180,7 @@ def test_waiting_ready_and_finished_games_reject_ai_chat(
     ready_response = client.post(f"/api/games/{game['id']}/ai-chat", json=payload)
     assert ready_response.status_code == 409
 
+    client.post(f"/api/games/{game['id']}/me/acknowledge-intro")
     client.post(f"/api/games/{game['id']}/start")
     for _ in range(len(PHASE_SEQUENCE) - 1):
         response = _advance_one_phase(client, db_session, game)

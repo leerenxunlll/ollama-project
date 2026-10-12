@@ -93,6 +93,11 @@ class DirectorCharacterFact(BaseModel):
     speaking_style: str
     personal_goal: str
     is_killer: bool
+    personal_history: str | None = None
+    relationship_to_victim: str | None = None
+    pre_case_experience: str | None = None
+    private_secrets: list[str] = Field(default_factory=list)
+    initial_knowledge: list[str] = Field(default_factory=list)
 
 
 class DirectorClueFact(BaseModel):
@@ -107,6 +112,27 @@ class DirectorClueFact(BaseModel):
     importance: int
 
 
+class DirectorSharedChapterFact(BaseModel):
+    """A complete public story chapter available to the Director."""
+
+    chapter_id: int
+    chapter_order: int
+    unlock_phase: Literal["intro", "act_1", "act_2"]
+    title: str
+    content: str
+
+
+class DirectorCharacterChapterFact(BaseModel):
+    """A complete private role chapter available only in Director context."""
+
+    chapter_id: int
+    character_id: int
+    chapter_order: int
+    unlock_phase: Literal["intro", "act_1", "act_2"]
+    title: str
+    content: str
+
+
 class DirectorScriptContext(BaseModel):
     """Current Script facts without a speculative canonical truth document."""
 
@@ -119,8 +145,12 @@ class DirectorScriptContext(BaseModel):
     difficulty: str | None
     status: str
     culprit_character_id: int | None
+    case_truth: dict[str, object] = Field(default_factory=dict)
+    canonical_timeline: list[dict[str, object]] = Field(default_factory=list)
     characters: list[DirectorCharacterFact]
     clues: list[DirectorClueFact]
+    shared_script_chapters: list[DirectorSharedChapterFact]
+    character_script_chapters: list[DirectorCharacterChapterFact]
 
 
 class DirectorPublicMessage(BaseModel):

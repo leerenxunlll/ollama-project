@@ -54,6 +54,7 @@ from app.schemas.game import (
     PlayerMessageCreate,
     SelectableCharacterRead,
 )
+from app.schemas.story import IntroAcknowledgementRead, ScriptChapterRead
 from app.services.character_chat import send_character_message
 from app.services.character_context import build_character_context
 from app.services.game_flow import create_vote, get_game_flow_state, get_vote_result
@@ -66,6 +67,11 @@ from app.services.gameplay import (
     start_game,
 )
 from app.services.public_turn import run_proactive_step, send_public_turn
+from app.services.script_chapters import (
+    acknowledge_human_intro,
+    get_human_chapters,
+    get_public_chapters,
+)
 
 router = APIRouter()
 
@@ -484,9 +490,62 @@ def get_my_character(game_id: int, db: Session = Depends(get_db)) -> MyCharacter
         personality=character.personality,
         speaking_style=character.speaking_style,
         personal_goal=character.personal_goal,
+        personal_history=character.personal_history,
+        relationship_to_victim=character.relationship_to_victim,
+        pre_case_experience=character.pre_case_experience,
+        private_secrets=character.private_secrets_json or [],
+        initial_knowledge=character.initial_knowledge_json or [],
         current_emotion=runtime_character.current_emotion,
         current_goal=runtime_character.current_goal,
     )
+
+
+@router.get(
+    "/games/{game_id}/story/public",
+    response_model=list[ScriptChapterRead],
+)
+def get_public_story(
+    game_id: int, db: Session = Depends(get_db)
+) -> list[ScriptChapterRead]:
+    """Return the public chapters already unlocked for this game's phase."""
+    try:
+        return get_public_chapters(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get(
+    "/games/{game_id}/me/story",
+    response_model=list[ScriptChapterRead],
+)
+def get_my_story(
+    game_id: int, db: Session = Depends(get_db)
+) -> list[ScriptChapterRead]:
+    """Return only unlocked private chapters for this game's human character."""
+    try:
+        return get_human_chapters(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post(
+    "/games/{game_id}/me/acknowledge-intro",
+    response_model=IntroAcknowledgementRead,
+)
+def acknowledge_my_intro(
+    game_id: int, db: Session = Depends(get_db)
+) -> IntroAcknowledgementRead:
+    """Persist the selected human's confirmation before the game starts."""
+    try:
+        return acknowledge_human_intro(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get(

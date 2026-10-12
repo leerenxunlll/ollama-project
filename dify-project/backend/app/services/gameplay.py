@@ -23,6 +23,7 @@ from app.schemas.game import (
     PlayerMessageCreate,
 )
 from app.services.game_flow import get_game_flow_state
+from app.services.script_chapters import has_human_intro_chapter
 
 PHASE_MESSAGES = {
     "act_1": "进入第一幕。",
@@ -54,6 +55,14 @@ def start_game(db: Session, game_id: int) -> GameStateRead:
         ).all()
     )
     validate_start(game.status, [character.controller_type for character in characters])
+    human_character = next(
+        character for character in characters if character.controller_type == "human"
+    )
+    if (
+        has_human_intro_chapter(db, game.script_id, human_character.character_id)
+        and game.human_intro_acknowledged_at is None
+    ):
+        raise GameRuleError("Read and acknowledge your intro before starting")
 
     now = datetime.now(timezone.utc)
     game.status = "in_progress"

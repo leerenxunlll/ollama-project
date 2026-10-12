@@ -27,6 +27,20 @@ test('opens Development and reads an AI character debug state', async ({
     { data: { game_character_id: game.game_characters[0].id } },
   )
   expect(selectCharacterResponse.ok()).toBeTruthy()
+
+  const myStoryResponse = await request.get(`/api/games/${game.id}/me/story`)
+  if (myStoryResponse.ok()) {
+    const myChapters = (await myStoryResponse.json()) as Array<{
+      unlock_phase: string
+    }>
+    if (myChapters.some((chapter) => chapter.unlock_phase === 'intro')) {
+      const acknowledgementResponse = await request.post(
+        `/api/games/${game.id}/me/acknowledge-intro`,
+      )
+      expect(acknowledgementResponse.ok()).toBeTruthy()
+    }
+  }
+
   const startGameResponse = await request.post(`/api/games/${game.id}/start`)
   expect(startGameResponse.ok()).toBeTruthy()
 

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
 import {
+  acknowledgeIntro,
   advanceGamePhase,
   analyzeGameSituation,
   applyDirectorRecommendation,
@@ -16,7 +17,9 @@ import {
   getGameVoteResult,
   getInvestigationLocations,
   getMyCharacter,
+  getMyStory,
   getPublicMessages,
+  getPublicStory,
   getScripts,
   getSelectableCharacters,
   requestAiStep,
@@ -34,8 +37,11 @@ import {
   type DirectorRecommendationRecord,
   type DirectorStatusResponse,
   type GameFlowState,
+  type GamePhase,
   type GameResponse,
   type GameStateResponse,
+  type GameStatus,
+  type StoryChapterRead,
   type InvestigationSearchResponse,
   type MessageRead,
   type MyCharacterCard,
@@ -44,6 +50,31 @@ import {
   type SelectableCharacter,
   type VoteResult,
 } from './api'
+import WriterDraftDebug from './WriterDraftDebug'
+
+const GAME_PHASE_LABELS: Record<GamePhase, string> = {
+  intro: '序章',
+  act_1: '第一幕',
+  investigation_1: '第一幕搜证',
+  discussion_1: '第一幕讨论',
+  act_2: '第二幕',
+  investigation_2: '第二幕搜证',
+  discussion_2: '第二幕讨论',
+  final_discussion: '最终讨论',
+  vote: '投票',
+  ending: '结局',
+}
+
+const GAME_STATUS_LABELS: Record<GameStatus, string> = {
+  waiting_for_character_selection: '等待选择角色',
+  ready: '等待开始',
+  in_progress: '进行中',
+  finished: '已结束',
+  completed: '已完成',
+  abandoned: '已放弃',
+}
+
+const RECENT_GAME_SESSION_LIMIT = 10
 
 interface DevelopmentPageProps {
   onBack: () => void
@@ -52,10 +83,15 @@ interface DevelopmentPageProps {
 function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   const [scripts, setScripts] = useState<ScriptSummary[]>([])
   const [games, setGames] = useState<GameResponse[]>([])
+  const [showAllGameSessions, setShowAllGameSessions] = useState(false)
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState('')
   const [game, setGame] = useState<GameResponse | null>(null)
   const [gameState, setGameState] = useState<GameStateResponse | null>(null)
+  const [publicStory, setPublicStory] = useState<StoryChapterRead[]>([])
+  const [myStory, setMyStory] = useState<StoryChapterRead[]>([])
+  const [storyLoading, setStoryLoading] = useState(false)
+  const [storyError, setStoryError] = useState('')
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null)
   const [selectableCharacters, setSelectableCharacters] = useState<
     SelectableCharacter[]
@@ -276,6 +312,20 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   }, [game?.id, selectedGameId])
 
   const inProgressGames = games.filter((item) => item.status === 'in_progress')
+  const recentGames = games.slice(0, RECENT_GAME_SESSION_LIMIT)
+  const selectedGameIsRecent = recentGames.some(
+    (item) => item.id === selectedGameId,
+  )
+  const selectedHistoricalGame =
+    !showAllGameSessions && selectedGameId !== null && !selectedGameIsRecent
+      ? games.find((item) => item.id === selectedGameId)
+      : undefined
+  const visibleGames = showAllGameSessions
+    ? games
+    : [
+        ...recentGames,
+        ...(selectedHistoricalGame ? [selectedHistoricalGame] : []),
+      ]
   const aiChatGame = inProgressGames.find((item) => item.id === aiChatGameId)
   const aiCharacters =
     aiChatGame?.game_characters.filter(
@@ -433,10 +483,17 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
   async function loadGameSession(gameId: number) {
     setGameError('')
+    setStoryError('')
+    setStoryLoading(true)
     setContext(null)
     setSearchResult(null)
     setLocations([])
     setSelectedLocation('')
+    if (selectedGameId !== gameId) {
+      setMyCharacter(null)
+      setPublicStory([])
+      setMyStory([])
+    }
 
     try {
       const [loadedGame, loadedState] = await Promise.all([
@@ -449,6 +506,8 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       if (loadedGame.status === 'waiting_for_character_selection') {
         setMyCharacter(null)
+        setPublicStory([])
+        setMyStory([])
         setContextCharacterId(loadedGame.game_characters[0]?.id ?? null)
         setSelectableCharacters(await getSelectableCharacters(gameId))
       } else {
@@ -470,9 +529,29 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           setLocations(available.locations)
           setSelectedLocation(available.locations[0] ?? '')
         }
+
+        if (playerCharacter !== null) {
+          try {
+            const [loadedPublicStory, loadedMyStory] = await Promise.all([
+              getPublicStory(gameId),
+              getMyStory(gameId),
+            ])
+            setPublicStory(loadedPublicStory)
+            setMyStory(loadedMyStory)
+          } catch (error) {
+            setStoryError(
+              error instanceof Error ? error.message : '读取剧本章节失败',
+            )
+          }
+        } else {
+          setPublicStory([])
+          setMyStory([])
+        }
       }
     } catch (error) {
       setGameError(error instanceof Error ? error.message : '读取游戏失败')
+    } finally {
+      setStoryLoading(false)
     }
   }
 
@@ -532,6 +611,38 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       setGames(await getGames())
     } catch (error) {
       setGameError(error instanceof Error ? error.message : '开始游戏失败')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  async function handleAcknowledgeIntro() {
+    if (selectedGameId === null || game === null) return
+
+    setActionLoading('acknowledge')
+    setGameError('')
+    try {
+      const acknowledgement = await acknowledgeIntro(selectedGameId)
+      setGame((current) =>
+        current === null
+          ? null
+          : {
+              ...current,
+              human_intro_acknowledged_at: acknowledgement.acknowledged_at,
+            },
+      )
+      setGames((currentGames) =>
+        currentGames.map((currentGame) =>
+          currentGame.id === selectedGameId
+            ? {
+                ...currentGame,
+                human_intro_acknowledged_at: acknowledgement.acknowledged_at,
+              }
+            : currentGame,
+        ),
+      )
+    } catch (error) {
+      setGameError(error instanceof Error ? error.message : '确认阅读失败')
     } finally {
       setActionLoading('')
     }
@@ -790,28 +901,58 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
               if (gameId) void loadGameSession(gameId)
             }}
           >
-            <option value="">选择 GameSession</option>
-            {games.map((item) => (
+            <option value="">选择一局游戏</option>
+            {visibleGames.map((item) => (
               <option key={item.id} value={item.id}>
-                #{item.id} · {item.status} · Script #{item.script_id}
+                #{item.id} · {GAME_STATUS_LABELS[item.status]} · 剧本 #
+                {item.script_id}
+                {item.id === selectedHistoricalGame?.id ? ' · 当前选择' : ''}
               </option>
             ))}
           </select>
+          {games.length > RECENT_GAME_SESSION_LIMIT && (
+            <div className="game-history-controls">
+              <span>
+                {selectedHistoricalGame
+                  ? `最近 ${RECENT_GAME_SESSION_LIMIT} 局，另含当前选择 #${selectedHistoricalGame.id}`
+                  : `最近 ${visibleGames.length} / ${games.length} 局`}
+              </span>
+              <button
+                className="action-button"
+                type="button"
+                aria-expanded={showAllGameSessions}
+                onClick={() => setShowAllGameSessions((showing) => !showing)}
+              >
+                {showAllGameSessions
+                  ? `仅显示最近 ${RECENT_GAME_SESSION_LIMIT} 局`
+                  : `显示全部历史（${games.length} 局）`}
+              </button>
+            </div>
+          )}
 
           {game && (
             <div className="session-meta">
               <span>
                 阶段{' '}
                 <strong>
-                  {gameState?.current_phase ?? game.current_phase}
+                  {
+                    GAME_PHASE_LABELS[
+                      gameState?.current_phase ?? game.current_phase
+                    ]
+                  }
                 </strong>
               </span>
               <span>
-                状态 <strong>{game.status}</strong>
+                状态 <strong>{GAME_STATUS_LABELS[game.status]}</strong>
               </span>
               {gameState && (
                 <span>
-                  下一阶段 <strong>{gameState.next_phase ?? '无'}</strong>
+                  下一阶段{' '}
+                  <strong>
+                    {gameState.next_phase
+                      ? GAME_PHASE_LABELS[gameState.next_phase]
+                      : '无'}
+                  </strong>
                 </span>
               )}
             </div>
@@ -878,15 +1019,67 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             </ol>
           )}
 
+          {game &&
+            game.status !== 'waiting_for_character_selection' &&
+            myCharacter && (
+              <StoryReader
+                key={game.id}
+                publicChapters={publicStory}
+                personalChapters={myStory}
+                loading={storyLoading}
+                error={storyError}
+              />
+            )}
+
+          {game?.status === 'ready' &&
+            myStory.some((chapter) => chapter.unlock_phase === 'intro') && (
+              <div className="intro-acknowledgement">
+                <div>
+                  <p className="section-caption">
+                    阅读公共与个人序章后，确认已准备好开始。
+                  </p>
+                  {game.human_intro_acknowledged_at && (
+                    <p className="intro-acknowledged" role="status">
+                      序章已确认阅读
+                    </p>
+                  )}
+                </div>
+                <button
+                  className="action-button"
+                  type="button"
+                  disabled={
+                    actionLoading !== '' ||
+                    game.human_intro_acknowledged_at !== null
+                  }
+                  onClick={handleAcknowledgeIntro}
+                >
+                  {actionLoading === 'acknowledge'
+                    ? '确认中…'
+                    : game.human_intro_acknowledged_at
+                      ? '已确认阅读'
+                      : '确认已阅读'}
+                </button>
+              </div>
+            )}
+
           {game?.status === 'ready' && (
             <div className="game-action-row">
               <p className="section-caption">
-                角色分配已锁定，可以开始这一局。
+                {myStory.some((chapter) => chapter.unlock_phase === 'intro') &&
+                !game.human_intro_acknowledged_at
+                  ? '请先确认已阅读序章。'
+                  : '角色分配已锁定，可以开始这一局。'}
               </p>
               <button
                 className="action-button"
                 type="button"
-                disabled={actionLoading !== ''}
+                disabled={
+                  actionLoading !== '' ||
+                  (myStory.some(
+                    (chapter) => chapter.unlock_phase === 'intro',
+                  ) &&
+                    !game.human_intro_acknowledged_at)
+                }
                 onClick={handleStartGame}
               >
                 {actionLoading === 'start'
@@ -899,9 +1092,9 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           {gameState?.status === 'in_progress' && (
             <div className="game-action-row">
               <p className="section-caption">
-                当前阶段：{gameState.current_phase}
+                当前阶段：{GAME_PHASE_LABELS[gameState.current_phase]}
                 {gameState.next_phase
-                  ? ` · 下一阶段：${gameState.next_phase}`
+                  ? ` · 下一阶段：${GAME_PHASE_LABELS[gameState.next_phase]}`
                   : ' · 已到最后阶段'}
               </p>
               {gameState.next_phase && (
@@ -1019,7 +1212,9 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             <div className="flow-summary-grid">
               <div className="flow-stat">
                 <span>当前阶段</span>
-                <strong>{currentGameFlow.current_phase}</strong>
+                <strong>
+                  {GAME_PHASE_LABELS[currentGameFlow.current_phase]}
+                </strong>
               </div>
               <div className="flow-stat">
                 <span>阶段已用时间</span>
@@ -1366,6 +1561,8 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             </div>
           )}
       </section>
+
+      <WriterDraftDebug />
 
       {myCharacter && (
         <section className="dev-panel detail-panel" aria-label="真人角色卡">
@@ -1829,6 +2026,174 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
         </span>
       </footer>
     </main>
+  )
+}
+
+interface StoryReaderProps {
+  publicChapters: StoryChapterRead[]
+  personalChapters: StoryChapterRead[]
+  loading: boolean
+  error: string
+}
+
+function latestChapterId(chapters: StoryChapterRead[]): number | null {
+  return (
+    chapters.reduce<StoryChapterRead | null>(
+      (latest, chapter) =>
+        latest === null || chapter.chapter_order > latest.chapter_order
+          ? chapter
+          : latest,
+      null,
+    )?.chapter_id ?? null
+  )
+}
+
+function StoryReader({
+  publicChapters,
+  personalChapters,
+  loading,
+  error,
+}: StoryReaderProps) {
+  const [activeTab, setActiveTab] = useState<'public' | 'personal'>('public')
+  const [selectedPublicChapterId, setSelectedPublicChapterId] = useState<
+    number | null
+  >(null)
+  const [selectedPersonalChapterId, setSelectedPersonalChapterId] = useState<
+    number | null
+  >(null)
+
+  useEffect(() => {
+    setSelectedPublicChapterId(latestChapterId(publicChapters))
+  }, [publicChapters])
+
+  useEffect(() => {
+    setSelectedPersonalChapterId(latestChapterId(personalChapters))
+  }, [personalChapters])
+
+  const chapters = activeTab === 'public' ? publicChapters : personalChapters
+  const selectedChapterId =
+    activeTab === 'public' ? selectedPublicChapterId : selectedPersonalChapterId
+  const selectedChapter =
+    chapters.find((chapter) => chapter.chapter_id === selectedChapterId) ??
+    chapters.reduce<StoryChapterRead | null>(
+      (latest, chapter) =>
+        latest === null || chapter.chapter_order > latest.chapter_order
+          ? chapter
+          : latest,
+      null,
+    )
+
+  function handleTabChange(tab: 'public' | 'personal') {
+    setActiveTab(tab)
+  }
+
+  return (
+    <section className="story-reader" aria-label="已解锁剧本阅读">
+      <div className="story-reader-heading">
+        <div>
+          <p className="eyebrow">STORY READER</p>
+          <h3>剧本阅读</h3>
+        </div>
+        <span className="record-count">
+          {chapters.length} CHAPTER{chapters.length === 1 ? '' : 'S'}
+        </span>
+      </div>
+
+      <div className="story-tabs" role="tablist" aria-label="剧本类型">
+        <button
+          className={activeTab === 'public' ? 'is-active' : ''}
+          id="public-story-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'public'}
+          aria-controls="story-reader-content"
+          onClick={() => handleTabChange('public')}
+        >
+          公共剧情
+        </button>
+        <button
+          className={activeTab === 'personal' ? 'is-active' : ''}
+          id="personal-story-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'personal'}
+          aria-controls="story-reader-content"
+          onClick={() => handleTabChange('personal')}
+        >
+          个人剧情
+        </button>
+      </div>
+
+      {loading && <p className="dev-message">正在读取已解锁章节…</p>}
+      {error && (
+        <p className="dev-message error-message" role="alert">
+          {error}
+        </p>
+      )}
+
+      {!loading && !error && (
+        <div id="story-reader-content" role="tabpanel">
+          {chapters.length === 0 ? (
+            <p className="dev-message">
+              {activeTab === 'public'
+                ? '当前没有已解锁的公共章节。'
+                : '当前没有已解锁的个人章节。'}
+            </p>
+          ) : (
+            <>
+              <label className="field-label" htmlFor="story-chapter-select">
+                选择章节
+              </label>
+              <select
+                className="dev-select story-chapter-select"
+                id="story-chapter-select"
+                value={selectedChapter?.chapter_id ?? ''}
+                onChange={(event) => {
+                  const chapterId = Number(event.target.value)
+                  if (activeTab === 'public') {
+                    setSelectedPublicChapterId(chapterId)
+                  } else {
+                    setSelectedPersonalChapterId(chapterId)
+                  }
+                }}
+              >
+                {chapters
+                  .slice()
+                  .sort(
+                    (left, right) => left.chapter_order - right.chapter_order,
+                  )
+                  .map((chapter) => (
+                    <option key={chapter.chapter_id} value={chapter.chapter_id}>
+                      {chapter.unlock_phase === 'intro'
+                        ? '序章'
+                        : chapter.unlock_phase === 'act_1'
+                          ? '第一幕'
+                          : '第二幕'}
+                      {' · '}
+                      {chapter.title}
+                    </option>
+                  ))}
+              </select>
+              {selectedChapter && (
+                <article className="story-chapter">
+                  <p className="eyebrow">
+                    {selectedChapter.unlock_phase === 'intro'
+                      ? 'INTRODUCTION'
+                      : selectedChapter.unlock_phase === 'act_1'
+                        ? 'ACT 1'
+                        : 'ACT 2'}
+                  </p>
+                  <h4>{selectedChapter.title}</h4>
+                  <p className="story-chapter-content">
+                    {selectedChapter.content}
+                  </p>
+                </article>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 

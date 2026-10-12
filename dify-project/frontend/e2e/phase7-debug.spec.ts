@@ -77,7 +77,13 @@ test('shows the Phase 7 game flow and Director debug without private context', a
       return
     }
     if (pathname === '/api/games' && method === 'GET') {
-      await fulfillJson(route, [game])
+      await fulfillJson(
+        route,
+        Array.from({ length: 35 }, (_, index) => ({
+          ...game,
+          id: gameId - index,
+        })),
+      )
       return
     }
     if (pathname === '/api/ai/status' && method === 'GET') {
@@ -86,6 +92,10 @@ test('shows the Phase 7 game flow and Director debug without private context', a
     }
     if (pathname === '/api/director/status' && method === 'GET') {
       await fulfillJson(route, { configured: true })
+      return
+    }
+    if (pathname === '/api/writer/status' && method === 'GET') {
+      await fulfillJson(route, { configured: false })
       return
     }
     if (pathname === `/api/games/${gameId}` && method === 'GET') {
@@ -229,8 +239,28 @@ test('shows the Phase 7 game flow and Director debug without private context', a
     page.getByRole('heading', { name: '游戏规则与 AI 对话验证' }),
   ).toBeVisible()
 
+  await expect(page.locator('#game-session-select option')).toHaveCount(11)
+  await expect(
+    page.getByRole('button', { name: '显示全部历史（35 局）' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: '显示全部历史（35 局）' }).click()
+  await expect(page.locator('#game-session-select option')).toHaveCount(36)
+  await expect(
+    page.getByRole('button', { name: '仅显示最近 10 局' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: '仅显示最近 10 局' }).click()
+
   await page.locator('#game-session-select').selectOption(String(gameId))
-  await expect(page.locator('.flow-summary-grid')).toContainText('vote')
+  await expect(page.locator('#game-session-select option').nth(1)).toHaveText(
+    '#77 · 进行中 · 剧本 #12',
+  )
+  await expect(page.locator('.session-meta')).toContainText('阶段 投票')
+  await expect(page.locator('.session-meta')).toContainText('状态 进行中')
+  await expect(page.locator('.session-meta')).toContainText('下一阶段 结局')
+  await expect(page.locator('.game-action-row')).toContainText(
+    '当前阶段：投票 · 下一阶段：结局',
+  )
+  await expect(page.locator('.flow-summary-grid')).toContainText('投票')
   await expect(page.locator('.flow-summary-grid').nth(0)).toContainText(
     /1:3[0-9]/,
   )

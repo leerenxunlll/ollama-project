@@ -67,6 +67,8 @@ def _start_game(client, db_session: Session) -> tuple[dict, dict[str, int]]:
         json={"game_character_id": character_ids["林澈"]},
     )
     assert selected.status_code == 200
+    acknowledged = client.post(f"/api/games/{game['id']}/me/acknowledge-intro")
+    assert acknowledged.status_code == 200
     started = client.post(f"/api/games/{game['id']}/start")
     assert started.status_code == 200
     return game, character_ids

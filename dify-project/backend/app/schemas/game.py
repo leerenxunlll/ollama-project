@@ -43,6 +43,7 @@ class GameRead(BaseModel):
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None
+    human_intro_acknowledged_at: datetime | None
     game_characters: list[GameCharacterRead]
 
 
@@ -164,5 +165,10 @@ class MyCharacterRead(BaseModel):
     personality: str
     speaking_style: str
     personal_goal: str
+    personal_history: str | None = None
+    relationship_to_victim: str | None = None
+    pre_case_experience: str | None = None
+    private_secrets: list[str] = Field(default_factory=list)
+    initial_knowledge: list[str] = Field(default_factory=list)
     current_emotion: str | None
     current_goal: str | None

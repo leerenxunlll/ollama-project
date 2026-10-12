@@ -20,6 +20,7 @@ INVESTIGATION_ACTS = {
     "investigation_1": "act_1",
     "investigation_2": "act_2",
 }
+SCRIPT_CHAPTER_UNLOCK_PHASES = ("intro", "act_1", "act_2")
 
 
 class GameRuleError(ValueError):
@@ -39,6 +40,23 @@ def validate_start(status: str, controller_types: Sequence[str | None]) -> None:
 def next_phase(current_phase: str) -> str | None:
     """Return the one legal next phase, if the current phase is known."""
     return PHASE_TRANSITIONS.get(current_phase)
+
+
+def unlocked_script_chapter_phases(status: str, current_phase: str) -> tuple[str, ...]:
+    """Return reached chapter phases using the explicit game phase sequence."""
+    if status in {"waiting_for_character_selection", "ready"}:
+        return ("intro",)
+
+    try:
+        current_index = PHASE_SEQUENCE.index(current_phase)
+    except ValueError as error:
+        raise GameRuleError("Game has an unknown narrative phase") from error
+
+    return tuple(
+        phase
+        for phase in SCRIPT_CHAPTER_UNLOCK_PHASES
+        if PHASE_SEQUENCE.index(phase) <= current_index
+    )
 
 
 def require_next_phase(current_phase: str) -> str:

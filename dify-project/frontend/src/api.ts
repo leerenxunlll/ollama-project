@@ -118,10 +118,27 @@ export interface GameResponse {
   script_id: number
   status: GameStatus
   current_phase: GamePhase
+  human_intro_acknowledged_at: string | null
   created_at: string
   started_at: string | null
   ended_at: string | null
   game_characters: GameCharacterSummary[]
+}
+
+export type StoryUnlockPhase = 'intro' | 'act_1' | 'act_2'
+
+export interface StoryChapterRead {
+  chapter_id: number
+  title: string
+  chapter_order: number
+  unlock_phase: StoryUnlockPhase
+  content: string
+}
+
+export interface IntroAcknowledgementResponse {
+  game_id: number
+  acknowledged: boolean
+  acknowledged_at: string | null
 }
 
 export interface GameStateResponse {
@@ -177,6 +194,193 @@ export interface VoteResult {
 
 export interface DirectorStatusResponse {
   configured: boolean
+}
+
+export type WriterDifficulty = 'easy' | 'medium' | 'hard'
+export type WriterPhase = 'intro' | 'act_1' | 'act_2'
+
+export interface WriterCreateRequest {
+  theme: string
+  era: string
+  atmosphere: string
+  difficulty: WriterDifficulty
+  custom_requirements?: string | null
+}
+
+export interface WriterCharacterDraft {
+  role_key: 'role_1' | 'role_2' | 'role_3' | 'role_4'
+  name: string
+  age: number | null
+  identity: string
+  public_background: string
+  private_background: string
+  personality: string
+  speaking_style: string
+  personal_goal: string
+  personal_history: string
+  relationship_to_victim: string
+  pre_case_experience: string
+  private_secrets: string[]
+  initial_knowledge: string[]
+}
+
+export interface WriterBlueprint {
+  script_metadata: {
+    title: string
+    summary: string
+    theme: string
+    era: string
+    atmosphere: string
+    difficulty: WriterDifficulty
+  }
+  case_truth: {
+    culprit_role_key: WriterCharacterDraft['role_key']
+    victim: string
+    motive: string
+    method: string
+    crime_time: string
+    crime_location: string
+    case_summary: string
+    key_causal_facts: string[]
+  }
+  canonical_timeline: Array<{
+    event_key: string
+    time: string
+    location: string
+    description: string
+    involved_role_keys: WriterCharacterDraft['role_key'][]
+    is_public_knowledge: boolean
+  }>
+  characters: WriterCharacterDraft[]
+  clues: Array<{
+    clue_key: string
+    name: string
+    description: string
+    act: 'act_1' | 'act_2'
+    location: string
+    is_core: boolean
+    importance: number
+    related_event_keys: string[]
+  }>
+}
+
+export interface WriterChapter {
+  title: string
+  content: string
+  chapter_order: number
+  unlock_phase: WriterPhase
+}
+
+export interface WriterChapterPack {
+  phase: WriterPhase
+  shared_chapter: WriterChapter
+  character_chapters: Array<
+    WriterChapter & {
+      role_key: WriterCharacterDraft['role_key']
+    }
+  >
+}
+
+export interface WriterDraft {
+  id: number
+  status: string
+  content_revision: number
+  publication_status: 'unpublished' | 'publishing' | 'published'
+  published_script_id: number | null
+  generation_request: WriterCreateRequest
+  blueprint: WriterBlueprint | null
+  chapter_packs: Partial<Record<WriterPhase, WriterChapterPack>>
+  step_durations_seconds: Record<string, number>
+  failed_step: string | null
+  last_error_type: string | null
+  completed_steps: string[]
+}
+
+export interface WriterStatusResponse {
+  configured: boolean
+}
+
+export interface ScriptQualityStatusResponse {
+  configured: boolean
+}
+
+export type ScriptReviewSeverity = 'critical' | 'high' | 'medium' | 'low'
+export type ScriptReviewVerdict = 'pass' | 'needs_revision' | 'blocked'
+
+export interface ScriptReviewIssue {
+  issue_code: string
+  category: string
+  severity: ScriptReviewSeverity
+  description: string
+  location: {
+    scope:
+      | 'blueprint'
+      | 'case_truth'
+      | 'timeline_event'
+      | 'character'
+      | 'clue'
+      | 'shared_chapter'
+      | 'character_chapter'
+    field_path: string
+    phase: WriterPhase | null
+    role_key: WriterCharacterDraft['role_key'] | null
+    event_key: string | null
+    clue_key: string | null
+  }
+  evidence: string
+  suggested_fix: string
+}
+
+export interface ScriptReviewRun {
+  id: number
+  draft_id: number
+  content_revision: number
+  review_status: 'completed' | 'failed' | 'stale'
+  report: {
+    verdict: ScriptReviewVerdict
+    summary: string
+    issues: ScriptReviewIssue[]
+  } | null
+  error_type: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface ScriptRevisionRecord {
+  id: number
+  draft_id: number
+  from_revision: number
+  to_revision: number
+  phase: WriterPhase
+  related_review_id: number
+  issues_addressed: ScriptReviewIssue[]
+  previous_chapter_pack: WriterChapterPack
+  new_chapter_pack: WriterChapterPack
+  created_at: string
+}
+
+export interface ScriptRevisionResponse {
+  revision: ScriptRevisionRecord
+  content_revision: number
+}
+
+export interface ScriptApprovalResponse {
+  draft_id: number
+  content_revision: number
+  review_run_id: number
+  accepted_medium_issue_indexes: number[]
+  approved_at: string
+}
+
+export interface ScriptPublicationResponse {
+  draft_id: number
+  publication_status: 'unpublished' | 'publishing' | 'published'
+  script_id: number | null
+  content_revision: number
+  title: string | null
+  approved_revision: number | null
+  approved_review_run_id: number | null
+  approved_at: string | null
 }
 
 export interface DirectorRecommendationRecord {
@@ -238,6 +442,11 @@ export interface SelectableCharacter {
 export interface MyCharacterCard extends SelectableCharacter {
   private_background: string
   personal_goal: string
+  personal_history: string | null
+  relationship_to_victim: string | null
+  pre_case_experience: string | null
+  private_secrets: string[]
+  initial_knowledge: string[]
   current_emotion: string | null
   current_goal: string | null
 }
@@ -329,6 +538,13 @@ async function requestJson<T>(
         const errorPayload = (await response.json()) as { detail?: unknown }
         if (typeof errorPayload.detail === 'string') {
           message = errorPayload.detail
+        } else if (
+          typeof errorPayload.detail === 'object' &&
+          errorPayload.detail !== null &&
+          'message' in errorPayload.detail &&
+          typeof errorPayload.detail.message === 'string'
+        ) {
+          message = errorPayload.detail.message
         }
       } catch {
         // Some development server errors do not return JSON.
@@ -450,6 +666,104 @@ export function getDirectorStatus(
   return requestJson('/api/director/status', { signal })
 }
 
+export function getWriterStatus(
+  signal?: AbortSignal,
+): Promise<WriterStatusResponse> {
+  return requestJson('/api/writer/status', { signal })
+}
+
+export function getScriptQualityStatus(
+  signal?: AbortSignal,
+): Promise<ScriptQualityStatusResponse> {
+  return requestJson('/api/writer/quality/status', { signal })
+}
+
+export function createWriterDraft(
+  request: WriterCreateRequest,
+): Promise<WriterDraft> {
+  return requestJson('/api/writer/drafts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export function getWriterDraft(draftId: number): Promise<WriterDraft> {
+  return requestJson(`/api/writer/drafts/${draftId}`)
+}
+
+export function generateWriterBlueprint(draftId: number): Promise<WriterDraft> {
+  return requestJson(`/api/writer/drafts/${draftId}/generate-blueprint`, {
+    method: 'POST',
+  })
+}
+
+export function generateWriterChapterPack(
+  draftId: number,
+  phase: WriterPhase,
+): Promise<WriterDraft> {
+  return requestJson(
+    `/api/writer/drafts/${draftId}/generate-chapter-pack/${phase}`,
+    { method: 'POST' },
+  )
+}
+
+export function reviewWriterDraft(draftId: number): Promise<ScriptReviewRun> {
+  return requestJson('/api/writer/drafts/' + draftId + '/review', {
+    method: 'POST',
+  })
+}
+
+export function getWriterDraftReviews(
+  draftId: number,
+): Promise<ScriptReviewRun[]> {
+  return requestJson('/api/writer/drafts/' + draftId + '/reviews')
+}
+
+export function reviseWriterDraft(
+  draftId: number,
+  phase: WriterPhase,
+): Promise<ScriptRevisionResponse> {
+  return requestJson('/api/writer/drafts/' + draftId + '/revise/' + phase, {
+    method: 'POST',
+  })
+}
+
+export function getWriterDraftRevisions(
+  draftId: number,
+): Promise<ScriptRevisionRecord[]> {
+  return requestJson('/api/writer/drafts/' + draftId + '/revisions')
+}
+
+export function approveWriterDraft(
+  draftId: number,
+  reviewRunId: number,
+  acceptedMediumIssueIndexes: number[],
+): Promise<ScriptApprovalResponse> {
+  return requestJson('/api/writer/drafts/' + draftId + '/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      review_run_id: reviewRunId,
+      accepted_medium_issue_indexes: acceptedMediumIssueIndexes,
+    }),
+  })
+}
+
+export function publishWriterDraft(
+  draftId: number,
+): Promise<ScriptPublicationResponse> {
+  return requestJson('/api/writer/drafts/' + draftId + '/publish', {
+    method: 'POST',
+  })
+}
+
+export function getWriterDraftPublication(
+  draftId: number,
+): Promise<ScriptPublicationResponse> {
+  return requestJson('/api/writer/drafts/' + draftId + '/publication')
+}
+
 export function analyzeGameSituation(
   gameId: number,
 ): Promise<DirectorRecommendationRecord> {
@@ -516,6 +830,22 @@ export function selectCharacter(
 
 export function getMyCharacter(gameId: number): Promise<MyCharacterCard> {
   return requestJson(`/api/games/${gameId}/me/character`)
+}
+
+export function getPublicStory(gameId: number): Promise<StoryChapterRead[]> {
+  return requestJson(`/api/games/${gameId}/story/public`)
+}
+
+export function getMyStory(gameId: number): Promise<StoryChapterRead[]> {
+  return requestJson(`/api/games/${gameId}/me/story`)
+}
+
+export function acknowledgeIntro(
+  gameId: number,
+): Promise<IntroAcknowledgementResponse> {
+  return requestJson(`/api/games/${gameId}/me/acknowledge-intro`, {
+    method: 'POST',
+  })
 }
 
 export function getCharacterContext(
