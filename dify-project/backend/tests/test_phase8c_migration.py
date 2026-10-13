@@ -31,7 +31,7 @@ def test_empty_database_upgrades_to_phase8c_head(tmp_path, monkeypatch) -> None:
             connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
             ).scalar_one()
-            == "20261012_phase8c_mapping"
+            == "20261012_phase9_runtime"
         )
         tables = {
             row[0]
@@ -134,5 +134,5 @@ def test_existing_phase8c_database_gets_missing_clue_event_mapping(
             "SELECT version_num FROM alembic_version"
         ).scalar_one()
     assert "clue_event_keys_json" in columns
-    assert revision == "20261012_phase8c_mapping"
+    assert revision == "20261012_phase9_runtime"
     engine.dispose()

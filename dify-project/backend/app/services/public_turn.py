@@ -1,6 +1,7 @@
 """Orchestrate one bounded public conversation between game characters."""
 
 import logging
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -27,6 +28,7 @@ from app.schemas.game import MessageRead
 from app.schemas.interaction import CharacterInteraction
 from app.services.character_context import build_character_context
 from app.services.character_response import persist_character_reply
+from app.services.runtime_guards import StaleRuntimeAction
 
 logger = logging.getLogger(__name__)
 PROACTIVE_TRIGGER = (
@@ -48,6 +50,8 @@ def send_public_turn(
         raise GameRuleError("Public chat requires an in-progress game")
     if not can_public_speak(game.status, game.current_phase):
         raise GameRuleError("Public speech is not allowed in the current phase")
+    phase_at_start = game.current_phase
+    phase_started_at = game.phase_started_at
 
     characters = _load_game_characters(db, game_id)
     humans = [
@@ -90,6 +94,19 @@ def send_public_turn(
     while (
         next_speaker is not None and len(ai_responses) < MAX_AI_RESPONSES_PER_HUMAN_TURN
     ):
+        db.refresh(game)
+        if (
+            game.status != "in_progress"
+            or game.current_phase != phase_at_start
+            or game.phase_started_at != phase_started_at
+        ):
+            failures.append(
+                PublicTurnFailure(
+                    game_character_id=next_speaker.game_character_id,
+                    error_type="StaleRuntimeAction",
+                )
+            )
+            break
         responder = character_by_id[next_speaker.game_character_id]
         interaction = CharacterInteraction(
             mode="public_reply",
@@ -131,7 +148,14 @@ def send_public_turn(
             content=reply.speech,
         )
         try:
-            persist_character_reply(db, responder, ai_message, reply)
+            persist_character_reply(
+                db,
+                responder,
+                ai_message,
+                reply,
+                expected_phase=phase_at_start,
+                expected_phase_started_at=phase_started_at,
+            )
         except Exception as error:
             db.rollback()
             logger.warning(
@@ -202,6 +226,10 @@ def run_proactive_speaker_step(
     agent: CharacterAgent,
     *,
     commit: bool = True,
+    expected_phase: str | None = None,
+    expected_phase_started_at: datetime | None = None,
+    runtime_claim_token: str | None = None,
+    now: datetime | None = None,
 ) -> AIProactiveStepResponse:
     """Request one specific eligible AI speaker without starting a response chain."""
     game = db.get(GameSession, game_id)
@@ -211,6 +239,17 @@ def run_proactive_speaker_step(
         raise GameRuleError("AI step requires an in-progress game")
     if not can_public_speak(game.status, game.current_phase):
         raise GameRuleError("Public speech is not allowed in the current phase")
+    if expected_phase is not None and (
+        game.current_phase != expected_phase
+        or game.phase_started_at != expected_phase_started_at
+    ):
+        raise StaleRuntimeAction("Game phase changed before proactive speech")
+    action_phase = expected_phase or game.current_phase
+    action_phase_started_at = (
+        expected_phase_started_at
+        if expected_phase is not None
+        else game.phase_started_at
+    )
 
     ai_characters = [
         character
@@ -245,7 +284,17 @@ def run_proactive_speaker_step(
         receiver_game_character_id=None,
         content=reply.speech,
     )
-    persist_character_reply(db, runtime_character, ai_message, reply, commit=commit)
+    persist_character_reply(
+        db,
+        runtime_character,
+        ai_message,
+        reply,
+        commit=commit,
+        expected_phase=action_phase,
+        expected_phase_started_at=action_phase_started_at,
+        runtime_claim_token=runtime_claim_token,
+        now=now,
+    )
     return AIProactiveStepResponse(ai_message=MessageRead.model_validate(ai_message))
 
 

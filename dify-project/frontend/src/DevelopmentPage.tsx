@@ -51,6 +51,7 @@ import {
   type VoteResult,
 } from './api'
 import WriterDraftDebug from './WriterDraftDebug'
+import RuntimeControlPanel from './RuntimeControlPanel'
 
 const GAME_PHASE_LABELS: Record<GamePhase, string> = {
   intro: '序章',
@@ -801,6 +802,24 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     }
   }
 
+  async function handleRuntimeUpdate(gameId: number) {
+    await loadGameSession(gameId)
+    try {
+      const [loadedGames, loadedFlow] = await Promise.all([
+        getGames(),
+        getGameFlow(gameId),
+      ])
+      setGames(loadedGames)
+      setGameFlow(loadedFlow)
+      setGameFlowUpdatedAt(Date.now())
+      if (aiChatGameId === gameId) {
+        setPublicMessages(await getPublicMessages(gameId))
+      }
+    } catch {
+      // The Runtime panel reports action errors; other debug panels can refresh separately.
+    }
+  }
+
   return (
     <main className="page-shell dev-shell">
       <header className="topbar">
@@ -819,7 +838,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
 
       <section className="dev-intro">
         <p className="eyebrow">
-          <span /> PHASE 07 / GAME FLOW & DIRECTOR DEBUG
+          <span /> PHASE 09 / AUTONOMOUS GAME RUNTIME
         </p>
         <h1>游戏规则与 AI 对话验证</h1>
         <p className="description">验证阶段计时、投票统计与导演建议应用。</p>
@@ -1399,6 +1418,17 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           </>
         )}
       </section>
+
+      {selectedGame && (
+        <RuntimeControlPanel
+          gameId={selectedGame.id}
+          gameStatus={selectedGame.status}
+          currentPhase={gameState?.current_phase ?? selectedGame.current_phase}
+          publicChapters={publicStory}
+          personalChapters={myStory}
+          onRuntimeUpdate={() => void handleRuntimeUpdate(selectedGame.id)}
+        />
+      )}
 
       <section
         className="dev-panel detail-panel"

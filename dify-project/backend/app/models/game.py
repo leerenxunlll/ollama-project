@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -75,6 +76,15 @@ class GameSession(Base):
     votes: Mapped[list["Vote"]] = relationship(back_populates="game_session")
     director_recommendations: Mapped[list["DirectorRecommendationRecord"]] = (
         relationship(back_populates="game_session")
+    )
+    runtime_state: Mapped["GameRuntimeState | None"] = relationship(
+        back_populates="game_session", uselist=False
+    )
+    phase_acknowledgements: Mapped[list["GamePhaseAcknowledgement"]] = relationship(
+        back_populates="game_session"
+    )
+    runtime_actions: Mapped[list["GameRuntimeActionLog"]] = relationship(
+        back_populates="game_session"
     )
 
 
@@ -273,6 +283,11 @@ class DirectorRecommendationRecord(Base):
         nullable=True,
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+    source_phase: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    source_phase_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_last_public_message_id: Mapped[int | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -505,3 +520,135 @@ class CharacterMemory(Base):
     source_message: Mapped["Message"] = relationship(
         back_populates="memory_updates", foreign_keys=[source_message_id]
     )
+
+
+class GameRuntimeState(Base):
+    """Bounded scheduling state for one started game session."""
+
+    __tablename__ = "game_runtime_states"
+    __table_args__ = (
+        CheckConstraint(
+            "action_status IN ('idle', 'processing', 'failed')",
+            name="ck_game_runtime_states_action_status",
+        ),
+        CheckConstraint(
+            "ready_phase IS NULL OR ready_phase IN "
+            "('investigation_1', 'discussion_1', 'investigation_2', "
+            "'discussion_2', 'final_discussion')",
+            name="ck_game_runtime_states_ready_phase",
+        ),
+    )
+
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_tick_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_director_analysis_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_processed_public_message_id: Mapped[int | None] = mapped_column(nullable=True)
+    last_processed_phase_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_inactivity_phase_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ready_phase: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    claim_token: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    claimed_phase: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    claimed_phase_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    action_status: Mapped[str] = mapped_column(
+        String(20), default="idle", nullable=False
+    )
+    last_action_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    game_session: Mapped["GameSession"] = relationship(back_populates="runtime_state")
+
+
+class GamePhaseAcknowledgement(Base):
+    """One idempotent human read confirmation for each Act chapter phase."""
+
+    __tablename__ = "game_phase_acknowledgements"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_session_id", "phase", name="uq_game_phase_acknowledgement"
+        ),
+        CheckConstraint(
+            "phase IN ('act_1', 'act_2')",
+            name="ck_game_phase_acknowledgements_phase",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), nullable=False
+    )
+    phase: Mapped[str] = mapped_column(String(40), nullable=False)
+    acknowledged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    game_session: Mapped["GameSession"] = relationship(
+        back_populates="phase_acknowledgements"
+    )
+
+
+class GameRuntimeActionLog(Base):
+    """Secret-free audit data for one deduplicated runtime event or action."""
+
+    __tablename__ = "game_runtime_action_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_session_id", "event_key", name="uq_game_runtime_action_event"
+        ),
+        CheckConstraint(
+            "execution_status IN ('processing', 'completed', 'failed', 'skipped')",
+            name="ck_game_runtime_action_execution_status",
+        ),
+        Index(
+            "ix_game_runtime_action_game_started",
+            "game_session_id",
+            "started_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), nullable=False
+    )
+    event_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    action_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    execution_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    related_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id"), nullable=True
+    )
+    related_recommendation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("director_recommendations.id"), nullable=True
+    )
+
+    game_session: Mapped["GameSession"] = relationship(back_populates="runtime_actions")

@@ -1,6 +1,6 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。Phase 8B 的本地 Writer Draft、Mock 回归与真实 Writer Dify 四步 smoke 均已通过。Phase 8C 已实现本地确定性校验、Quality Workflow 接口、受控修订、人工批准和事务化发布；真实 Quality Dify smoke 尚未完成。Writer 生成的内容必须经过审核和显式批准，才会创建正式 Script。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。Phase 0–8C 已完成；当前 Phase 9 增加受控 Runtime Orchestrator，在玩家页面活跃时按需协调现有 Director 与 Character Agent。Writer 生成的内容必须经过审核和显式批准，才会创建正式 Script。
 
 ## Phase 3 已完成
 
@@ -91,9 +91,15 @@ Phase 8C 对完整 Draft 先执行确定性结构、数量和引用校验，再�
 
 审查记录绑定 `content_revision`。修订每次只针对一个章节包，保留前后版本，每个阶段最多两次；修订后必须重新审查。Blueprint、案件真相、时间线、角色与线索不会由修订工作流改写。人工批准必须对应当前已审查版本；medium 问题需要逐条显式接受。发布在一个数据库事务中创建 Script、四个 Character、Clue、15 个章节和 Director 专用真相数据；重复发布返回同一 Script。
 
-Quality 使用独立 `DIFY_SCRIPT_QUALITY_API_KEY`，不回退到 Character、Director 或 Writer Key。配置方法和 Dify 节点、Schema、Prompt、请求样例见 [Dify Script Quality Workflow 配置](docs/dify-script-quality-workflow.md)。当前本地 Mock 测试不替代真实 Quality Workflow smoke。Writer/Quality 调试接口仅在 `APP_ENV=development` 开放，当前项目尚无用户登录授权，不适合公开部署。
+Quality 使用独立 `DIFY_SCRIPT_QUALITY_API_KEY`，不回退到 Character、Director 或 Writer Key。配置方法和 Dify 节点、Schema、Prompt、请求样例见 [Dify Script Quality Workflow 配置](docs/dify-script-quality-workflow.md)。Writer/Quality 调试接口仅在 `APP_ENV=development` 开放，当前项目尚无用户登录授权，不适合公开部署。
 
 Development API：`GET /api/writer/quality/status`、`POST /api/writer/drafts/{id}/review`、`GET /api/writer/drafts/{id}/reviews`、`POST /api/writer/drafts/{id}/revise/{phase}`、`GET /api/writer/drafts/{id}/revisions`、`POST /api/writer/drafts/{id}/approve`、`POST /api/writer/drafts/{id}/publish`、`GET /api/writer/drafts/{id}/publication`。
+
+## Phase 9：自主游戏 Runtime
+
+Runtime 使用客户端定时 Tick，不运行后台 worker。每个 Tick 通过数据库原子认领一局游戏，并且最多执行一次 AI 主动发言或一次阶段推进；Director 分析后也只处理至多一条建议。阅读阶段要求玩家确认已阅读，调查和讨论阶段需要玩家明确准备结束，最终讨论需要确认进入投票；Runtime 不会代替 AI 投票。Runtime API 与控制面板仅在 `APP_ENV=development` 开放。
+
+Runtime 复用现有 Game Flow Manager、Director Recommendation Apply、Speaker Scheduler、Character Context Builder 和 Character Agent。SQLite migration 会新增 Runtime 状态、阶段确认和安全动作日志，并为 Director Recommendation 保存其来源阶段。升级已有数据库时，先在项目根目录执行 `alembic -c backend/alembic.ini upgrade head`；启动时 `create_all()` 不会迁移现有表。完整策略、API、并发认领与浏览器关闭时的行为见 [Game Runtime 说明](docs/game-runtime.md)。
 
 ## 技术栈
 
@@ -207,7 +213,7 @@ npm run dev
 
 Writer Workflow 的完整节点、Schema、Prompts、配置和 smoke 教程见 [Dify Writer Workflow 配置](docs/dify-writer-workflow.md)。在 Writer App 发布并配置独立 Key 前，页面会显示 Writer 未配置；Mock 测试通过不代表真实 Dify Workflow 已验证。
 
-Script Quality Workflow 的真实调用还需单独配置 `DIFY_SCRIPT_QUALITY_API_KEY` 并发布 Workflow；详细步骤见 [Quality Workflow 配置](docs/dify-script-quality-workflow.md)。
+Script Quality Workflow 使用独立 `DIFY_SCRIPT_QUALITY_API_KEY`；Dify 节点、Schema 与调用步骤见 [Quality Workflow 配置](docs/dify-script-quality-workflow.md)。
 
 ### Real Dify smoke test
 

@@ -173,6 +173,72 @@ export interface GameFlowState {
   }
 }
 
+export interface GameRuntimeActionRead {
+  id: number
+  event_type: string
+  action_type: string | null
+  execution_status: 'processing' | 'completed' | 'failed' | 'skipped'
+  reason_code: string | null
+  started_at: string
+  completed_at: string | null
+  related_message_id: number | null
+  related_recommendation_id: number | null
+}
+
+export interface GameRuntimeStatus {
+  game_id: number
+  game_status: GameStatus
+  current_phase: GamePhase
+  runtime_status: 'not_started' | 'enabled' | 'paused'
+  phase_read_acknowledged: boolean
+  ready_for_phase: GamePhase | null
+  action_status: 'idle' | 'processing' | 'failed'
+  last_tick_at: string | null
+  last_director_analysis_at: string | null
+  last_proactive_speech_at: string | null
+  last_action_type: string | null
+  last_error_code: string | null
+  next_check_after_seconds: number
+  recent_actions: GameRuntimeActionRead[]
+}
+
+export interface RuntimeStepResult {
+  game_id: number
+  runtime_status: 'not_started' | 'enabled' | 'paused'
+  action_type:
+    | 'none'
+    | 'director_analysis'
+    | 'proactive_speech'
+    | 'phase_advance'
+    | 'advisory'
+  execution_status: 'idle' | 'completed' | 'failed' | 'conflict'
+  phase_before: GamePhase
+  phase_after: GamePhase
+  public_message_id: number | null
+  recommendation_id: number | null
+  reason_code: string
+  next_check_after_seconds: number
+}
+
+export interface PhaseAcknowledgement {
+  game_id: number
+  phase: 'intro' | 'act_1' | 'act_2'
+  acknowledged: boolean
+  acknowledged_at: string
+}
+
+export interface RuntimeReadyResponse {
+  game_id: number
+  phase:
+    | 'investigation_1'
+    | 'discussion_1'
+    | 'investigation_2'
+    | 'discussion_2'
+    | 'final_discussion'
+  ready: boolean
+  ready_at: string
+}
+
 export interface VoteRead {
   id: number
   game_session_id: number
@@ -639,6 +705,36 @@ export function getGameState(gameId: number): Promise<GameStateResponse> {
 
 export function getGameFlow(gameId: number): Promise<GameFlowState> {
   return requestJson(`/api/games/${gameId}/flow`)
+}
+
+export function getGameRuntime(gameId: number): Promise<GameRuntimeStatus> {
+  return requestJson(`/api/games/${gameId}/runtime`)
+}
+
+export function startGameRuntime(gameId: number): Promise<GameRuntimeStatus> {
+  return requestJson(`/api/games/${gameId}/runtime/start`, { method: 'POST' })
+}
+
+export function pauseGameRuntime(gameId: number): Promise<GameRuntimeStatus> {
+  return requestJson(`/api/games/${gameId}/runtime/pause`, { method: 'POST' })
+}
+
+export function tickGameRuntime(gameId: number): Promise<RuntimeStepResult> {
+  return requestJson(`/api/games/${gameId}/runtime/tick`, { method: 'POST' })
+}
+
+export function acknowledgeRuntimePhase(
+  gameId: number,
+): Promise<PhaseAcknowledgement> {
+  return requestJson(`/api/games/${gameId}/runtime/acknowledge-phase`, {
+    method: 'POST',
+  })
+}
+
+export function markRuntimeReady(
+  gameId: number,
+): Promise<RuntimeReadyResponse> {
+  return requestJson(`/api/games/${gameId}/runtime/ready`, { method: 'POST' })
 }
 
 export function submitGameVote(

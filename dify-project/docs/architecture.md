@@ -9,6 +9,7 @@ flowchart LR
     Engine[游戏引擎<br/>确定性规则]
     Flow[Game Flow Manager<br/>流程资格与计时]
     Scheduler[Speaker Scheduler<br/>公开发言选人]
+    Runtime[Runtime Orchestrator<br/>有界调度]
     Agents[Agent 层<br/>AI 推理与生成]
     CharacterDify[Dify Character Chatflow]
     DirectorDify[Dify Director Workflow]
@@ -21,6 +22,9 @@ flowchart LR
     Backend --> Engine
     Backend --> Flow
     Backend --> Scheduler
+    Backend --> Runtime
+    Runtime -->|资格校验与状态推进| Flow
+    Runtime -->|调度现有 Agent| Agents
     Backend --> Agents
     Engine -->|确定性规则与状态变更| Database
     Flow -->|校验流程动作与 tally| Engine
@@ -45,6 +49,7 @@ Phase 3 建立固定阶段转换图、角色搜证与消息 API。Phase 4–5 �
 - **`state_machine.py`** 定义固定的合法 phase transition graph：回答“从当前阶段可以去哪里”。它不负责计时、动作资格或投票。
 - **Game Flow Manager** 是确定性流程控制：回答“当前是否允许执行动作”。它计算阶段时间、搜证/讨论/投票/推进资格，协调 State Machine 验证转换，并负责 Vote 校验和确定性 tally。它不调用任何 LLM。
 - **Speaker Scheduler** 位于 `backend/app/game/speaker_scheduler.py`，负责对话内的角色发言调度，例如点名匹配、round-robin 与 reaction responder。它与 phase progression、timing 和 vote 是不同领域。
+- **Runtime Orchestrator** 位于 `backend/app/services/game_runtime.py`，只决定何时调用现有 Game Flow、Director 与 Character 服务；它不拥有最终状态权威，也不实现第二套规则。
 - **Character Agent** 负责单个角色推理与生成，经 Schema 验证返回 speech、inner_os、emotion、intent 和 memory updates；AI 不允许直接修改核心游戏状态。
 - **Director Agent** 观察受限的导演视角并生成有限的 `DirectorRecommendation`。它既不是 Game Flow Manager，也不是 Speaker Scheduler；Director 不能写权威状态、改票、推进阶段或直接调用 Character Agent。
 - **Writer Agent** 根据明确创作请求生成待验证的 Script Draft。它不能发布正式 Script、改写已存在剧本或修改运行中游戏；输出先经 Schema 和确定性结构检查。
@@ -281,6 +286,18 @@ Character 的扩展预设字段按角色单独保存，并只加入该角色自�
 Review、Revision、Draft 内容、审批和发布 API 都只在 APP_ENV=development 开放。当前项目尚无玩家身份认证；公开部署前必须补充用户身份与权限控制，不能把 Development 服务直接暴露为公网审核入口。
 
 Quality Workflow 的 Dify 节点、完整 Schema、Prompts、HTTP 契约和 smoke 步骤见 [Dify Script Quality Workflow 配置](dify-script-quality-workflow.md)。
+
+## Phase 9 Runtime Orchestrator
+
+Runtime 由开发页面每 10 秒发送的 bounded Tick 驱动。客户端不在请求未结束时并行发送下一次 Tick；服务端仍以 SQLite conditional update 原子认领，避免多个浏览器或重试同时调度。每次 Tick 只执行一个主要副作用：一条 AI 公开发言，或一次经过 Game Flow Manager 和 State Machine 校验的阶段推进。Director 分析最多处理一条建议，不启动递归 Agent 循环。
+
+Runtime 复用现有 Director Context Builder、Director Agent、Recommendation Apply、Speaker Scheduler、Character Context Builder 和 Character Agent。Runtime 不直接改剧本真相、凶手、投票或角色私有记忆。Director 建议继续经过确定性 Validator；角色发言仍使用本角色权限过滤后的 Context。Dify 超时会结束本次动作并记录安全错误码，不会自动无限重试。
+
+阅读序章、第一幕或第二幕需要玩家确认，且需满足既有最低阶段时长。调查阶段必须由玩家声明结束；普通讨论可由玩家明确准备结束，或由 Director 在最低时长、玩家静默和建议校验均满足时推进；最终讨论只能由玩家明确确认进入投票。Runtime 不代投票，只有四名角色都已投票后 Game Flow 才允许进入结局。Public speech eligibility 仍由现有 Game Flow Manager 统一判定。
+
+Runtime state 保存开关、调度水位、冷却时间、claim token 与租约；Runtime Action Log 只保存事件类型、动作、状态、安全 reason code 和关联 ID，不保存 Director/Character Context、私人消息、inner_os 或案件秘密。Runtime status API 只返回安全状态与日志摘要。
+
+Runtime 不运行 Celery、Redis、APScheduler、后台 worker、WebSocket 或 SSE。浏览器关闭后 Tick 会停止，因此不保证后台持续调度；但阶段计时始终依据数据库中的服务端 `phase_started_at`，再次打开页面不会重置时间。接口与开发调试控制仅在 `APP_ENV=development` 开放。操作和恢复细节见 [Game Runtime 说明](game-runtime.md)。
 
 ## AI Integration Boundary
 

@@ -38,7 +38,7 @@ def test_empty_database_upgrades_to_phase8b_head(tmp_path, monkeypatch) -> None:
             connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
             ).scalar_one()
-            == "20261012_phase8c_mapping"
+            == "20261012_phase9_runtime"
         )
         tables = {
             row[0]

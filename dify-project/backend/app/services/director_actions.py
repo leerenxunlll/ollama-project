@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.agents.character_agent import CharacterAgent
@@ -23,6 +23,10 @@ from app.schemas.game import MessageRead
 from app.services.game_flow import get_game_flow_state
 from app.services.gameplay import advance_game_phase
 from app.services.public_turn import run_proactive_speaker_step
+from app.services.runtime_guards import (
+    StaleRuntimeAction,
+    assert_runtime_action_current,
+)
 
 
 class DirectorApplyConflict(Exception):
@@ -69,8 +73,16 @@ def apply_director_recommendation(
     recommendation_id: int,
     character_agent: CharacterAgent,
     now: datetime | None = None,
+    *,
+    commit_final: bool = True,
+    expected_phase: str | None = None,
+    expected_phase_started_at: datetime | None = None,
+    runtime_claim_token: str | None = None,
+    allow_phase_advance: bool = True,
+    allow_public_speech: bool = True,
 ) -> DirectorApplyResponse:
     """Resolve one persisted recommendation through deterministic backend checks."""
+    current_time = now or datetime.now(timezone.utc)
     claim = db.execute(
         update(DirectorRecommendationRecord)
         .where(
@@ -100,7 +112,12 @@ def apply_director_recommendation(
         raise LookupError("Director recommendation not found")
 
     action = DirectorAction(record.recommended_action)
-    current_time = now or datetime.now(timezone.utc)
+    action_phase = expected_phase or record.source_phase
+    action_phase_started_at = (
+        expected_phase_started_at
+        if expected_phase is not None
+        else record.source_phase_started_at
+    )
     recommendation = DirectorRecommendation(
         pace=record.pace,
         narrative_risk=record.narrative_risk,
@@ -115,10 +132,41 @@ def apply_director_recommendation(
     flow_state = None
     try:
         game = validate_director_references(db, game_id, recommendation)
+        if action_phase is not None and (
+            game.current_phase != action_phase
+            or game.phase_started_at != action_phase_started_at
+        ):
+            raise StaleRuntimeAction("Recommendation belongs to an old game phase")
+        if record.source_last_public_message_id is not None:
+            latest_public_message_id = db.scalar(
+                select(func.max(Message.id)).where(
+                    Message.game_session_id == game.id,
+                    Message.channel_type == "public",
+                )
+            )
+            if (
+                latest_public_message_id is not None
+                and latest_public_message_id > record.source_last_public_message_id
+            ):
+                raise StaleRuntimeAction(
+                    "A newer public message makes this recommendation stale"
+                )
+        if action_phase is not None or runtime_claim_token is not None:
+            assert_runtime_action_current(
+                db,
+                game.id,
+                claim_token=runtime_claim_token,
+                expected_phase=action_phase,
+                expected_phase_started_at=action_phase_started_at,
+                now=current_time,
+            )
         db.commit()
         if action == DirectorAction.no_action:
             outcome = "applied"
             reason = "No action was needed"
+        elif action == DirectorAction.request_ai_speaker and not allow_public_speech:
+            outcome = "advisory"
+            reason = "Runtime policy does not allow public speech in this phase"
         elif action == DirectorAction.request_ai_speaker:
             flow = get_game_flow_state(db, game.id, now=current_time)
             if not flow.can_public_speak:
@@ -132,12 +180,29 @@ def apply_director_recommendation(
                 recommendation.target_game_character_id,
                 character_agent,
                 commit=False,
+                expected_phase=action_phase,
+                expected_phase_started_at=action_phase_started_at,
+                runtime_claim_token=runtime_claim_token,
+                now=current_time,
             )
             response_message = proactive_result.ai_message
             outcome = "applied"
             reason = "One AI public speech was generated"
+        elif (
+            action == DirectorAction.recommend_phase_advance and not allow_phase_advance
+        ):
+            outcome = "advisory"
+            reason = "Runtime requires player readiness before advancing this phase"
         elif action == DirectorAction.recommend_phase_advance:
-            advance_game_phase(db, game.id, current_time, commit=False)
+            advance_game_phase(
+                db,
+                game.id,
+                current_time,
+                commit=False,
+                expected_phase=action_phase,
+                expected_phase_started_at=action_phase_started_at,
+                runtime_claim_token=runtime_claim_token,
+            )
             outcome = "applied"
             reason = "The next phase passed deterministic flow checks"
         else:
@@ -146,7 +211,10 @@ def apply_director_recommendation(
 
         record.status = outcome
         record.applied_at = current_time
-        db.commit()
+        if commit_final:
+            db.commit()
+        else:
+            db.flush()
         if action == DirectorAction.recommend_phase_advance:
             flow_state = get_game_flow_state(db, game.id, now=current_time)
     except Exception as error:
@@ -157,7 +225,10 @@ def apply_director_recommendation(
         record.status = "rejected"
         record.applied_at = current_time
         reason = _safe_rejection_reason(error)
-        db.commit()
+        if commit_final:
+            db.commit()
+        else:
+            db.flush()
         outcome = "rejected"
 
     return DirectorApplyResponse(

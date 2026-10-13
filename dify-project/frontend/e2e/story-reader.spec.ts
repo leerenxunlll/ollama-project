@@ -377,57 +377,79 @@ test('reads only unlocked public and personal script chapters', async ({
   await expect(page.getByText('PRIVATE_INTRO_SENTINEL')).not.toBeVisible()
   await page.getByRole('button', { name: '选择此角色' }).first().click()
 
-  await expect(page.getByRole('tab', { name: '公共剧情' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '暴雨夜' })).toBeVisible()
-  await expect(page.getByText('暴雨封锁了雾港。')).toBeVisible()
-  await expect(page.getByText('PRIVATE_INTRO_SENTINEL')).not.toBeVisible()
+  const storyReader = page.getByRole('region', { name: '已解锁剧本阅读' })
+  await expect(storyReader.getByRole('tab', { name: '公共剧情' })).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Start Game · 开始游戏' }),
-  ).toBeDisabled()
-
-  await page.getByRole('tab', { name: '个人剧情' }).click()
-  await expect(
-    page.getByRole('heading', { name: '林澈的来港缘由' }),
+    storyReader.getByRole('heading', { name: '暴雨夜' }),
   ).toBeVisible()
-  await expect(page.getByText('PRIVATE_INTRO_SENTINEL')).toBeVisible()
-  await expect(page.getByText('PRIVATE_ACT_1_SENTINEL')).not.toBeVisible()
+  await expect(storyReader.getByText('暴雨封锁了雾港。')).toBeVisible()
+  await expect(
+    storyReader.getByText('PRIVATE_INTRO_SENTINEL'),
+  ).not.toBeVisible()
   await expect(
     page.getByRole('button', { name: 'Start Game · 开始游戏' }),
   ).toBeDisabled()
 
-  await page.getByRole('button', { name: '确认已阅读' }).click()
+  await storyReader.getByRole('tab', { name: '个人剧情' }).click()
+  await expect(
+    storyReader.getByRole('heading', { name: '林澈的来港缘由' }),
+  ).toBeVisible()
+  await expect(storyReader.getByText('PRIVATE_INTRO_SENTINEL')).toBeVisible()
+  await expect(
+    storyReader.getByText('PRIVATE_ACT_1_SENTINEL'),
+  ).not.toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Start Game · 开始游戏' }),
+  ).toBeDisabled()
+
+  await page
+    .getByRole('region', { name: '开发数据验证' })
+    .getByRole('button', { name: '确认已阅读' })
+    .click()
   await expect(page.getByText('序章已确认阅读')).toBeVisible()
   await page.getByRole('button', { name: 'Start Game · 开始游戏' }).click()
   await expect(page.getByText(/当前阶段：序章/)).toBeVisible()
 
   await page.getByRole('button', { name: /Advance Phase/ }).click()
-  await page.getByRole('tab', { name: '公共剧情' }).click()
-  await expect(page.getByRole('heading', { name: '档案重启' })).toBeVisible()
-  await page.getByLabel('选择章节').selectOption('1')
-  await expect(page.getByRole('heading', { name: '暴雨夜' })).toBeVisible()
-  await page.getByLabel('选择章节').selectOption('2')
-  await expect(page.getByRole('heading', { name: '档案重启' })).toBeVisible()
-  await page.getByRole('tab', { name: '个人剧情' }).click()
+  await storyReader.getByRole('tab', { name: '公共剧情' }).click()
   await expect(
-    page.getByRole('heading', { name: '没有寄出的副本' }),
+    storyReader.getByRole('heading', { name: '档案重启' }),
   ).toBeVisible()
-  await page.getByLabel('选择章节').selectOption('11')
+  await storyReader.getByLabel('选择章节').selectOption('1')
   await expect(
-    page.getByRole('heading', { name: '林澈的来港缘由' }),
+    storyReader.getByRole('heading', { name: '暴雨夜' }),
   ).toBeVisible()
-  await page.getByLabel('选择章节').selectOption('12')
+  await storyReader.getByLabel('选择章节').selectOption('2')
   await expect(
-    page.getByRole('heading', { name: '没有寄出的副本' }),
+    storyReader.getByRole('heading', { name: '档案重启' }),
   ).toBeVisible()
-  await expect(page.getByText('PRIVATE_ACT_1_SENTINEL')).toBeVisible()
-  await expect(page.getByText('PRIVATE_ACT_2_SENTINEL')).not.toBeVisible()
+  await storyReader.getByRole('tab', { name: '个人剧情' }).click()
+  await expect(
+    storyReader.getByRole('heading', { name: '没有寄出的副本' }),
+  ).toBeVisible()
+  await storyReader.getByLabel('选择章节').selectOption('11')
+  await expect(
+    storyReader.getByRole('heading', { name: '林澈的来港缘由' }),
+  ).toBeVisible()
+  await storyReader.getByLabel('选择章节').selectOption('12')
+  await expect(
+    storyReader.getByRole('heading', { name: '没有寄出的副本' }),
+  ).toBeVisible()
+  await expect(storyReader.getByText('PRIVATE_ACT_1_SENTINEL')).toBeVisible()
+  await expect(
+    storyReader.getByText('PRIVATE_ACT_2_SENTINEL'),
+  ).not.toBeVisible()
 
-  await page.getByRole('tab', { name: '公共剧情' }).click()
+  await storyReader.getByRole('tab', { name: '公共剧情' }).click()
   await page.getByRole('button', { name: /Advance Phase/ }).click()
   await page.getByRole('button', { name: /Advance Phase/ }).click()
   await page.getByRole('button', { name: /Advance Phase/ }).click()
-  await expect(page.getByRole('heading', { name: '第二封信' })).toBeVisible()
-  await page.getByRole('tab', { name: '个人剧情' }).click()
-  await expect(page.getByRole('heading', { name: '迟到的回信' })).toBeVisible()
-  await expect(page.getByText('PRIVATE_ACT_2_SENTINEL')).toBeVisible()
+  await expect(
+    storyReader.getByRole('heading', { name: '第二封信' }),
+  ).toBeVisible()
+  await storyReader.getByRole('tab', { name: '个人剧情' }).click()
+  await expect(
+    storyReader.getByRole('heading', { name: '迟到的回信' }),
+  ).toBeVisible()
+  await expect(storyReader.getByText('PRIVATE_ACT_2_SENTINEL')).toBeVisible()
 })

@@ -23,6 +23,7 @@ from app.schemas.game import (
     PlayerMessageCreate,
 )
 from app.services.game_flow import get_game_flow_state
+from app.services.runtime_guards import assert_runtime_action_current
 from app.services.script_chapters import has_human_intro_chapter
 
 PHASE_MESSAGES = {
@@ -89,6 +90,9 @@ def advance_game_phase(
     now: datetime | None = None,
     *,
     commit: bool = True,
+    expected_phase: str | None = None,
+    expected_phase_started_at: datetime | None = None,
+    runtime_claim_token: str | None = None,
 ) -> GameStateRead:
     """Validate flow timing, then move exactly one step along the phase graph."""
     game = _get_game(db, game_id)
@@ -105,6 +109,15 @@ def advance_game_phase(
         )
 
     target_phase = require_next_phase(game.current_phase)
+    if expected_phase is not None or runtime_claim_token is not None:
+        assert_runtime_action_current(
+            db,
+            game.id,
+            claim_token=runtime_claim_token,
+            expected_phase=expected_phase,
+            expected_phase_started_at=expected_phase_started_at,
+            now=transition_time,
+        )
     game.current_phase = target_phase
     game.phase_started_at = transition_time
     content = PHASE_MESSAGES[target_phase]
