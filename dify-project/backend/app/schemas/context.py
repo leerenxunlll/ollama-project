@@ -66,7 +66,7 @@ class ContextMessage(BaseModel):
 
 
 class ContextClue(BaseModel):
-    """A clue explicitly granted to the context recipient."""
+    """A clue the recipient knows, with its authoritative knowledge source."""
 
     clue_id: int
     name: str
@@ -75,8 +75,13 @@ class ContextClue(BaseModel):
     location: str
     is_core: bool
     importance: int
-    discovered_at: datetime
+    discovered_at: datetime | None = None
     source: str | None
+    knowledge_source: Literal[
+        "direct_acquisition", "private_disclosure", "public_disclosure"
+    ]
+    first_known_at: datetime
+    source_game_character_id: int | None = None
 
 
 class ContextScriptChapter(BaseModel):
@@ -98,6 +103,9 @@ class CharacterContext(BaseModel):
     public_messages: list[ContextMessage]
     private_messages: list[ContextMessage]
     known_clues: list[ContextClue]
+    acquired_clues: list[ContextClue]
+    known_via_share_clues: list[ContextClue]
+    publicly_disclosed_clues: list[ContextClue]
     memories: list[ContextMemory]
     shared_script_chapters: list[ContextScriptChapter]
     character_script_chapters: list[ContextScriptChapter]

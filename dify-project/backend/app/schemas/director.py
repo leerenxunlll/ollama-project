@@ -171,7 +171,7 @@ class DirectorPublicState(BaseModel):
 
 
 class DirectorClueProgress(BaseModel):
-    """Objective clue acquisition state, not a character's subjective memory."""
+    """Objective clue progress without private message or disclosure details."""
 
     clue_id: int
     name: str
@@ -181,6 +181,9 @@ class DirectorClueProgress(BaseModel):
     importance: int
     available_in_current_phase: bool
     acquired_by_game_character_ids: list[int]
+    publicly_disclosed: bool
+    public_disclosure_count: int
+    private_disclosure_count: int
 
 
 class DirectorParticipation(BaseModel):

@@ -209,6 +209,7 @@ export interface RuntimeStepResult {
     | 'none'
     | 'director_analysis'
     | 'proactive_speech'
+    | 'ai_investigation'
     | 'phase_advance'
     | 'advisory'
   execution_status: 'idle' | 'completed' | 'failed' | 'conflict'
@@ -492,6 +493,52 @@ export interface InvestigationSearchResponse {
     is_core: boolean
     importance: number
   } | null
+}
+
+export type ClueKnowledgeSource =
+  'direct_acquisition' | 'private_disclosure' | 'public_disclosure'
+
+export interface ClueEvidence {
+  clue_id: number
+  name: string
+  description: string
+  act: string
+  location: string
+  importance: number
+  knowledge_source: ClueKnowledgeSource
+  first_known_at: string
+  source_game_character_id: number | null
+}
+
+export interface MyClueState {
+  game_id: number
+  human_game_character_id: number
+  acquired_clues: ClueEvidence[]
+  known_via_share_clues: ClueEvidence[]
+  publicly_disclosed_clues: ClueEvidence[]
+}
+
+export interface ClueHistoryEvent {
+  event_id: string
+  event_type:
+    'clue_acquired' | 'clue_shared_privately' | 'clue_disclosed_publicly'
+  clue_id: number
+  clue_name: string
+  actor_name: string
+  target_name: string | null
+  occurred_at: string
+}
+
+export interface ClueDisclosureResponse {
+  id: number
+  game_id: number
+  clue_id: number
+  source_game_character_id: number
+  visibility: 'private' | 'public'
+  target_game_character_id: number | null
+  related_message_id: number
+  created_at: string
+  replayed: boolean
 }
 
 export interface SelectableCharacter {
@@ -894,16 +941,42 @@ export function getInvestigationLocations(
 
 export function searchInvestigationLocation(
   gameId: number,
-  gameCharacterId: number,
   location: string,
 ): Promise<InvestigationSearchResponse> {
   return requestJson(`/api/games/${gameId}/investigation/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      game_character_id: gameCharacterId,
-      location,
-    }),
+    body: JSON.stringify({ location }),
+  })
+}
+
+export function getMyClues(gameId: number): Promise<MyClueState> {
+  return requestJson(`/api/games/${gameId}/me/clues`)
+}
+
+export function getPublicClues(
+  gameId: number,
+): Promise<{ game_id: number; clues: ClueEvidence[] }> {
+  return requestJson(`/api/games/${gameId}/clues/public`)
+}
+
+export function getClueEvents(gameId: number): Promise<ClueHistoryEvent[]> {
+  return requestJson(`/api/games/${gameId}/clues/events`)
+}
+
+export function shareClue(
+  gameId: number,
+  payload: {
+    clue_id: number
+    visibility: 'private' | 'public'
+    target_game_character_id: number | null
+    client_request_id: string
+  },
+): Promise<ClueDisclosureResponse> {
+  return requestJson(`/api/games/${gameId}/clues/share`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
 }
 

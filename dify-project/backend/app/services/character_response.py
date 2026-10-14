@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.character_agent import CharacterReply
 from app.models import CharacterMemory, CharacterThought, GameCharacter, Message
+from app.services.evidence import record_character_disclosure
 from app.services.runtime_guards import assert_runtime_action_current
 
 
@@ -44,6 +45,17 @@ def persist_character_reply(
             )
         db.add_all([*related_messages, ai_message])
         db.flush()
+        disclosure_intent = getattr(reply, "clue_disclosure_intent", None)
+        if disclosure_intent is not None:
+            record_character_disclosure(
+                db,
+                game_id=ai_message.game_session_id,
+                source=game_character,
+                clue_id=disclosure_intent.clue_id,
+                visibility=disclosure_intent.visibility,
+                target_game_character_id=(disclosure_intent.target_game_character_id),
+                speech_message=ai_message,
+            )
         db.add(
             CharacterThought(
                 game_session_id=ai_message.game_session_id,

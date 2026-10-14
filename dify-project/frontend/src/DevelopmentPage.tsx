@@ -15,7 +15,6 @@ import {
   getGames,
   getGameState,
   getGameVoteResult,
-  getInvestigationLocations,
   getMyCharacter,
   getMyStory,
   getPublicMessages,
@@ -23,7 +22,6 @@ import {
   getScripts,
   getSelectableCharacters,
   requestAiStep,
-  searchInvestigationLocation,
   selectCharacter,
   sendAiChat,
   sendPublicTurn,
@@ -41,8 +39,8 @@ import {
   type GameResponse,
   type GameStateResponse,
   type GameStatus,
+  type GameCharacterSummary,
   type StoryChapterRead,
-  type InvestigationSearchResponse,
   type MessageRead,
   type MyCharacterCard,
   type PublicTurnResponse,
@@ -52,6 +50,7 @@ import {
 } from './api'
 import WriterDraftDebug from './WriterDraftDebug'
 import RuntimeControlPanel from './RuntimeControlPanel'
+import EvidencePanel from './EvidencePanel'
 
 const GAME_PHASE_LABELS: Record<GamePhase, string> = {
   intro: '序章',
@@ -109,10 +108,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   const [context, setContext] = useState<CharacterContext | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState('')
-  const [locations, setLocations] = useState<string[]>([])
-  const [selectedLocation, setSelectedLocation] = useState('')
-  const [searchResult, setSearchResult] =
-    useState<InvestigationSearchResponse | null>(null)
   const [aiStatus, setAiStatus] = useState<AiStatusResponse | null>(null)
   const [aiStatusError, setAiStatusError] = useState('')
   const [aiChatGameId, setAiChatGameId] = useState<number | null>(null)
@@ -487,9 +482,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     setStoryError('')
     setStoryLoading(true)
     setContext(null)
-    setSearchResult(null)
-    setLocations([])
-    setSelectedLocation('')
     if (selectedGameId !== gameId) {
       setMyCharacter(null)
       setPublicStory([])
@@ -525,12 +517,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             loadedGame.game_characters[0]?.id ??
             null,
         )
-        if (loadedState.can_investigate) {
-          const available = await getInvestigationLocations(gameId)
-          setLocations(available.locations)
-          setSelectedLocation(available.locations[0] ?? '')
-        }
-
         if (playerCharacter !== null) {
           try {
             const [loadedPublicStory, loadedMyStory] = await Promise.all([
@@ -660,40 +646,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       setGames(await getGames())
     } catch (error) {
       setGameError(error instanceof Error ? error.message : '推进阶段失败')
-    } finally {
-      setActionLoading('')
-    }
-  }
-
-  async function handleSearch() {
-    if (
-      selectedGameId === null ||
-      myCharacter === null ||
-      selectedLocation === ''
-    ) {
-      return
-    }
-
-    setActionLoading('search')
-    setGameError('')
-    setContext(null)
-    try {
-      const result = await searchInvestigationLocation(
-        selectedGameId,
-        myCharacter.game_character_id,
-        selectedLocation,
-      )
-      setSearchResult(result)
-      if (contextCharacterId === myCharacter.game_character_id) {
-        setContext(
-          await getCharacterContext(
-            selectedGameId,
-            myCharacter.game_character_id,
-          ),
-        )
-      }
-    } catch (error) {
-      setGameError(error instanceof Error ? error.message : '搜证失败')
     } finally {
       setActionLoading('')
     }
@@ -1131,66 +1083,20 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
             </div>
           )}
 
-          {gameState?.can_investigate && (
-            <div className="investigation-controls">
-              <p className="eyebrow">DETERMINISTIC INVESTIGATION</p>
-              <p className="section-caption">
-                搜证角色：{myCharacter?.name ?? '尚未选择真人角色'}
-              </p>
-              {locations.length > 0 ? (
-                <div className="investigation-action">
-                  <label
-                    className="field-label"
-                    htmlFor="investigation-location"
-                  >
-                    选择地点
-                  </label>
-                  <select
-                    className="dev-select"
-                    id="investigation-location"
-                    value={selectedLocation}
-                    onChange={(event) =>
-                      setSelectedLocation(event.target.value)
-                    }
-                  >
-                    {locations.map((location) => (
-                      <option key={location} value={location}>
-                        {location}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="action-button"
-                    type="button"
-                    disabled={
-                      actionLoading !== '' ||
-                      myCharacter === null ||
-                      selectedLocation === ''
-                    }
-                    onClick={handleSearch}
-                  >
-                    {actionLoading === 'search'
-                      ? '搜证中…'
-                      : 'Search · 搜索地点'}
-                  </button>
-                </div>
-              ) : (
-                <p className="dev-message">当前调查幕没有预设线索地点。</p>
-              )}
-              {searchResult && (
-                <div className="search-result" role="status">
-                  {searchResult.found && searchResult.clue ? (
-                    <>
-                      <strong>发现线索：{searchResult.clue.name}</strong>
-                      <p>{searchResult.clue.description}</p>
-                    </>
-                  ) : (
-                    <p>这个地点没有新的线索。</p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {game &&
+            game.status !== 'waiting_for_character_selection' &&
+            myCharacter && (
+              <EvidencePanel
+                gameId={game.id}
+                humanGameCharacterId={myCharacter.game_character_id}
+                humanName={myCharacter.name}
+                aiCharacters={game.game_characters.filter(
+                  (character: GameCharacterSummary) =>
+                    character.controller_type === 'ai',
+                )}
+                canInvestigate={gameState?.can_investigate ?? false}
+              />
+            )}
         </div>
       </section>
 

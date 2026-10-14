@@ -14,14 +14,14 @@ from app.game.state_machine import (
     require_next_phase,
     validate_start,
 )
-from app.models import Clue, GameCharacter, GameCharacterClue, GameSession, Message
+from app.models import Clue, GameCharacter, GameSession, Message
 from app.schemas.game import (
     GameStateRead,
-    InvestigationClueRead,
     InvestigationLocationsRead,
     InvestigationResultRead,
     PlayerMessageCreate,
 )
+from app.services.evidence import search_for_human
 from app.services.game_flow import get_game_flow_state
 from app.services.runtime_guards import assert_runtime_action_current
 from app.services.script_chapters import has_human_intro_chapter
@@ -165,59 +165,11 @@ def get_investigation_locations(
 def search_location(
     db: Session,
     game_id: int,
-    game_character_id: int,
     location: str,
+    asserted_game_character_id: int | None = None,
 ) -> InvestigationResultRead:
-    """Grant the first undiscovered matching clue to one runtime character."""
-    game = _get_game(db, game_id)
-    _require_investigation(game)
-    character = db.get(GameCharacter, game_character_id)
-    if character is None or character.game_session_id != game.id:
-        raise LookupError("Character not found in this game")
-
-    act = clue_act_for_phase(game.current_phase)
-    clues = db.scalars(
-        select(Clue)
-        .where(
-            Clue.script_id == game.script_id,
-            Clue.act == act,
-            Clue.location == location,
-        )
-        .order_by(Clue.importance.desc(), Clue.id.asc())
-    ).all()
-    for clue in clues:
-        already_known = db.scalar(
-            select(GameCharacterClue.id).where(
-                GameCharacterClue.game_character_id == character.id,
-                GameCharacterClue.clue_id == clue.id,
-            )
-        )
-        if already_known is not None:
-            continue
-
-        db.add(
-            GameCharacterClue(
-                game_character_id=character.id,
-                clue_id=clue.id,
-                source="investigation",
-            )
-        )
-        db.commit()
-        return InvestigationResultRead(
-            game_id=game.id,
-            game_character_id=character.id,
-            location=location,
-            found=True,
-            clue=InvestigationClueRead.model_validate(clue),
-        )
-
-    return InvestigationResultRead(
-        game_id=game.id,
-        game_character_id=character.id,
-        location=location,
-        found=False,
-        clue=None,
-    )
+    """Resolve the Human actor server-side and run its deterministic search."""
+    return search_for_human(db, game_id, location, asserted_game_character_id)
 
 
 def create_player_message(

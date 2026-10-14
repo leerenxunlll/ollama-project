@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.game import MessageRead
 
@@ -116,6 +116,24 @@ class MemoryUpdate(BaseModel):
         return content.strip()
 
 
+class ClueDisclosureIntent(BaseModel):
+    """An untrusted request to disclose one clue the character already knows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    clue_id: int = Field(gt=0)
+    visibility: Literal["private", "public"]
+    target_game_character_id: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_target_for_visibility(self) -> "ClueDisclosureIntent":
+        if self.visibility == "private" and self.target_game_character_id is None:
+            raise ValueError("Private clue disclosure requires a target")
+        if self.visibility == "public" and self.target_game_character_id is not None:
+            raise ValueError("Public clue disclosure cannot have a target")
+        return self
+
+
 class CharacterModelOutput(BaseModel):
     """Strict JSON contract returned by the Dify Character Chatflow."""
 
@@ -126,6 +144,7 @@ class CharacterModelOutput(BaseModel):
     emotion: CharacterEmotion
     intent: CharacterIntent
     memory_updates: list[MemoryUpdate] = Field(max_length=2)
+    clue_disclosure_intent: ClueDisclosureIntent | None = None
 
     @field_validator("speech")
     @classmethod

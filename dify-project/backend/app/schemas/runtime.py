@@ -10,6 +10,7 @@ RuntimeActionType = Literal[
     "none",
     "director_analysis",
     "proactive_speech",
+    "ai_investigation",
     "phase_advance",
     "advisory",
 ]

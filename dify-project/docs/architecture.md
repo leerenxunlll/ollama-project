@@ -109,7 +109,7 @@ flowchart LR
 
 流程是：Game Flow Manager 校验该动作在当前流程中是否合格；State Machine 校验转换是否为唯一合法的下一阶段；Gameplay Service 应用通过校验的权威状态变更，并记录公开 system event。API route 只负责 HTTP 请求/响应映射。Director 只能提出建议；后端 deterministic rules 通过校验后才可应用，AI 不直接写入核心游戏状态。
 
-Phase 3 使用固定阶段顺序，不接受客户端提交任意目标阶段。搜证资格由后端依据游戏状态和当前阶段判定；线索从当前 Script 的对应 Act 与地点中稳定选取，并只写入执行搜证的 `GameCharacterClue`。`random_seed` 保留在 GameSession 中，但目前不影响状态推进或线索选择。
+Phase 3 使用固定阶段顺序，不接受客户端提交任意目标阶段。搜证资格由后端依据游戏状态和当前阶段判定；线索从当前 Script 的对应 Act 与地点中稳定选取，并写入 `GameCharacterClue` 记录发现事实。Phase 10 另用 `GameCharacterClueKnowledge` 记录角色通过搜证、私下分享或公开披露知道线索的事实；公开披露不会伪造其他角色的亲自搜证记录。`random_seed` 保留在 GameSession 中，但目前不影响状态推进或线索选择。
 
 ## Game Flow Manager 与阶段计时
 
@@ -187,6 +187,9 @@ Phase 8A 将预设叙事章节与案件真相、运行时认知和正式线索�
 | `CharacterMemory` | 单局角色在互动中形成的主观认知，可能正确也可能错误 | 仅该 GameCharacter 的后续 Character Context |
 | `CharacterThought` | 一次 AI 回复的私有 `inner_os`、emotion 与 intent | 仅后端及开发专用 Inspector，不进入 Character/Director Context |
 | `GameCharacterClue` | 经搜证规则明确授予某个运行角色的正式线索 | 仅获授线索的角色 Context；阅读章节不会创建或授予线索 |
+| `GameCharacterClueKnowledge` | 角色当前正式知道的 Canonical Clue 及知识来源 | 该角色、正式分享的目标角色或因公开披露获知的角色 |
+| `GameClueDisclosure` | 对已知 Canonical Clue 的一次正式私下分享或公开披露 | 私下披露只对发送者与目标可见；公开披露对全局可见 |
+| `GameClueDisclosureAttempt` | 角色提出但未通过校验的结构化披露意图及安全原因码 | 开发审计；不授予线索知识，也不含模型自由文本 |
 
 公共章节通过 `SharedScriptChapter.script_id` 归属 Script；私人章节通过 `CharacterScriptChapter.character_id` 归属角色模板。它们是可复用的剧本内容，不存放在 GameCharacter、Memory、Thought 或 Message 中。同一个 Script 开启多局时，各局共享模板章节，但 Memory、Thought、线索获取和序章确认仍按 GameSession 隔离。
 
@@ -295,6 +298,14 @@ Runtime 复用现有 Director Context Builder、Director Agent、Recommendation 
 
 阅读序章、第一幕或第二幕需要玩家确认，且需满足既有最低阶段时长。调查阶段必须由玩家声明结束；普通讨论可由玩家明确准备结束，或由 Director 在最低时长、玩家静默和建议校验均满足时推进；最终讨论只能由玩家明确确认进入投票。Runtime 不代投票，只有四名角色都已投票后 Game Flow 才允许进入结局。Public speech eligibility 仍由现有 Game Flow Manager 统一判定。
 
+## Phase 10 Investigation & Evidence Sharing
+
+Canonical `Clue` 始终来自已发布 Script。Human 搜证 API 由后端解析本局唯一 Human；AI 搜证只由 Runtime 在 `investigation_1` / `investigation_2` 阶段调用相同的确定性搜证服务，每次 Tick 最多一项，每名 AI 每个调查阶段最多一次。位置选择按固定顺序执行，不声称是 LLM 推理。
+
+`GameCharacterClue` 记载角色亲自获得线索；`GameCharacterClueKnowledge` 记载当前角色合法知道哪些线索及来源；`GameClueDisclosure` 记载显式私下分享或公开披露；`Message` 呈现相应交流。线索披露与消息在同一事务提交，唯一约束阻止重复正式事件。普通聊天中的台词不会创建线索或改变已知信息。
+
+CharacterContextBuilder 只向当前角色提供自己搜得、正式分享给自己或已经公开的线索，并分别表达其来源。DirectorContext 只统计搜证与披露状态；它不读取私下披露的消息正文、CharacterMemory、CharacterThought 或 inner_os。角色 Dify 输出增加可选 `clue_disclosure_intent`；后端在同一角色回复事务中验证游戏阶段、来源、线索知识与接收角色，拒绝项只保留不含自由文本的安全原因码。旧的 Phase 5 输出仍可解析。真实 Dify Chatflow 尚未更新时，不能将 AI 正式分享描述为真实云端联调完成。
+
 Runtime state 保存开关、调度水位、冷却时间、claim token 与租约；Runtime Action Log 只保存事件类型、动作、状态、安全 reason code 和关联 ID，不保存 Director/Character Context、私人消息、inner_os 或案件秘密。Runtime status API 只返回安全状态与日志摘要。
 
 Runtime 不运行 Celery、Redis、APScheduler、后台 worker、WebSocket 或 SSE。浏览器关闭后 Tick 会停止，因此不保证后台持续调度；但阶段计时始终依据数据库中的服务端 `phase_started_at`，再次打开页面不会重置时间。接口与开发调试控制仅在 `APP_ENV=development` 开放。操作和恢复细节见 [Game Runtime 说明](game-runtime.md)。
@@ -358,7 +369,8 @@ flowchart LR
 - 当前角色可获得自己的私密背景、目标和运行状态；其他角色只含姓名、身份与公开背景。
 - 公共消息和 system 消息进入公共事件流；private 消息只在当前角色是发送者或接收者，且双方都属于该局时出现。
 - system 消息目前没有公开/私有子类型，因此本阶段约定所有 system 消息均为公开旁白。后续 Director 私有消息必须先扩展信息类型后才能保存，不能混入当前 system 流。
-- `known_clues` 仅读取 `GameCharacterClue` 中授予当前角色的线索，并校验线索仍属于该局 Script；同一剧本的其他线索不会自动进入上下文。
+- `acquired_clues` 表示当前角色亲自搜得的线索；`known_via_share_clues` 表示因私下分享而知道的线索；`publicly_disclosed_clues` 表示已正式公开的线索。兼容字段 `known_clues` 只汇总当前角色实际知道的线索，后端校验它们属于该局 Script。
+- 未被当前角色发现、分享给它或公开披露的线索不会进入其 Context。Actor 对话中的自由文本不创建线索或赋予知识；Director Context 只得到客观线索进度及披露统计，不读私人 Message 正文。
 - `memories` 仅读取当前 GameCharacter 在当前 GameSession 中的记录，最多 20 条并按 importance、时间、ID 降序；其他角色 Memory 与任何历史 `inner_os` 都不进入 Context。
 - `public_messages` 仅含最近 20 条 public/system 消息；`private_messages` 仅含最近 20 条当前角色发送或接收的 private 消息。两类消息都在 SQL 查询中限量，返回 Context 前按时间正序排列。
 - 调试路由只在 `APP_ENV=development` 暴露。角色 Context API 不属于普通游戏前端接口；Character Agent 不直接读取 ORM model，也不直接查询数据库。

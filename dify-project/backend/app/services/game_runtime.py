@@ -36,6 +36,7 @@ from app.game.state_machine import GameRuleError
 from app.models import (
     DirectorRecommendationRecord,
     GameCharacter,
+    GameClueDisclosure,
     GamePhaseAcknowledgement,
     GameRuntimeActionLog,
     GameRuntimeState,
@@ -54,6 +55,11 @@ from app.services.director import analyze_game_with_director
 from app.services.director_actions import (
     DirectorApplyConflict,
     apply_director_recommendation,
+)
+from app.services.evidence import (
+    next_ai_investigation,
+    next_ai_investigation_location,
+    search_for_ai,
 )
 from app.services.game_flow import get_game_flow_state
 from app.services.gameplay import advance_game_phase
@@ -436,6 +442,23 @@ def run_runtime_tick(
                 "investigation_ready",
                 policy,
             )
+        scheduled_investigation = next_ai_investigation(
+            db,
+            game,
+            policy.ai_investigations_per_character_per_phase,
+        )
+        if scheduled_investigation is not None:
+            character, _attempt, event_key = scheduled_investigation
+            return _run_ai_investigation(
+                db,
+                game,
+                character,
+                event_key,
+                token,
+                phase_before,
+                current_time,
+                policy,
+            )
 
     if game.current_phase in DISCUSSION_PHASES | {"final_discussion"}:
         if ready_phase == game.current_phase:
@@ -682,6 +705,110 @@ def run_runtime_tick(
             policy=policy,
             action_log=failed_log,
         )
+
+
+def _run_ai_investigation(
+    db: Session,
+    game: GameSession,
+    character: GameCharacter,
+    event_key: str,
+    token: str,
+    phase_before: str,
+    now: datetime,
+    policy: RuntimePolicy,
+) -> RuntimeStepResult:
+    """Perform one deterministic AI search under the current Runtime claim."""
+    action_log = _new_action_log(
+        db,
+        game.id,
+        token,
+        event_key,
+        "ai_investigation",
+        "ai_investigation",
+        now,
+    )
+    if action_log is None:
+        return _finish_tick(
+            db,
+            game.id,
+            token,
+            phase_before,
+            now,
+            reason_code="no_new_event",
+            execution_status="idle",
+            policy=policy,
+        )
+
+    location = next_ai_investigation_location(db, game, character.id)
+    if location is None:
+        action_log.execution_status = "skipped"
+        action_log.reason_code = "no_investigation_locations"
+        action_log.completed_at = now
+        return _finish_tick(
+            db,
+            game.id,
+            token,
+            phase_before,
+            now,
+            reason_code="no_investigation_locations",
+            execution_status="completed",
+            action_type="ai_investigation",
+            policy=policy,
+            action_log=action_log,
+        )
+
+    try:
+        result = search_for_ai(
+            db,
+            game.id,
+            character.id,
+            location,
+            expected_phase=phase_before,
+            expected_phase_started_at=game.phase_started_at,
+            runtime_claim_token=token,
+            now=now,
+            commit=False,
+        )
+    except Exception as error:
+        db.rollback()
+        reason_code = _safe_runtime_error_code(error)
+        failed_log = _new_action_log(
+            db,
+            game.id,
+            token,
+            event_key,
+            "ai_investigation",
+            "ai_investigation",
+            now,
+        )
+        return _finish_tick(
+            db,
+            game.id,
+            token,
+            phase_before,
+            now,
+            reason_code=reason_code,
+            execution_status="failed",
+            action_type="ai_investigation",
+            policy=policy,
+            action_log=failed_log,
+        )
+
+    action_log.execution_status = "completed"
+    action_log.reason_code = "clue_acquired" if result.found else "no_new_clue"
+    action_log.completed_at = now
+    return _finish_tick(
+        db,
+        game.id,
+        token,
+        phase_before,
+        now,
+        reason_code=action_log.reason_code,
+        execution_status="completed",
+        action_type="ai_investigation",
+        policy=policy,
+        action_log=action_log,
+    )
 
 
 def _advance_for_runtime(
@@ -987,6 +1114,16 @@ def _director_event(
     ) != _time_key(phase_started_at)
     human_message = _latest_human_public_message(db, game.id)
     latest_human_id = human_message[0] if human_message is not None else None
+    latest_public_disclosure_id = db.scalar(
+        select(func.max(GameClueDisclosure.id)).where(
+            GameClueDisclosure.game_session_id == game.id,
+            GameClueDisclosure.visibility == "public",
+        )
+    )
+    has_new_public_disclosure = latest_public_disclosure_id is not None and (
+        state.last_processed_public_clue_disclosure_id is None
+        or latest_public_disclosure_id > state.last_processed_public_clue_disclosure_id
+    )
     has_new_human_message = latest_human_id is not None and (
         state.last_processed_public_message_id is None
         or latest_human_id > state.last_processed_public_message_id
@@ -995,6 +1132,7 @@ def _director_event(
     if phase_is_new and game.current_phase in analysis_phases:
         watermark_updates = {
             "last_processed_phase_started_at": phase_started_at,
+            "last_processed_public_clue_disclosure_id": latest_public_disclosure_id,
             **(
                 {"last_processed_public_message_id": latest_human_id}
                 if latest_human_id is not None
@@ -1012,12 +1150,27 @@ def _director_event(
             "phase_entry",
             watermark_updates,
         )
+    if has_new_public_disclosure and game.current_phase in analysis_phases:
+        return (
+            f"public-clue-disclosure:{latest_public_disclosure_id}",
+            "public_clue_disclosure",
+            {
+                "last_processed_public_clue_disclosure_id": latest_public_disclosure_id,
+                **(
+                    {"last_processed_public_message_id": latest_human_id}
+                    if latest_human_id is not None
+                    else {}
+                ),
+                "last_inactivity_phase_started_at": None,
+            },
+        )
     if has_new_human_message and game.current_phase in analysis_phases:
         return (
             f"human-message:{latest_human_id}",
             "human_public_message",
             {
                 "last_processed_public_message_id": latest_human_id,
+                "last_processed_public_clue_disclosure_id": latest_public_disclosure_id,
                 "last_inactivity_phase_started_at": None,
             },
         )
@@ -1037,6 +1190,9 @@ def _director_event(
                 {
                     "last_processed_phase_started_at": phase_started_at,
                     "last_inactivity_phase_started_at": phase_started_at,
+                    "last_processed_public_clue_disclosure_id": (
+                        latest_public_disclosure_id
+                    ),
                     **(
                         {"last_processed_public_message_id": latest_human_id}
                         if latest_human_id is not None

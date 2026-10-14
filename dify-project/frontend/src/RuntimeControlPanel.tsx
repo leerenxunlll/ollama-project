@@ -30,6 +30,7 @@ const ACTION_LABELS: Record<string, string> = {
   none: '无动作',
   director_analysis: '导演分析',
   proactive_speech: 'AI 主动发言',
+  ai_investigation: 'AI 搜证',
   phase_advance: '推进阶段',
   advisory: '仅记录建议',
 }
@@ -64,6 +65,9 @@ const REASON_LABELS: Record<string, string> = {
   no_eligible_action: '当前没有符合条件的动作',
   reading_completed: '阅读确认和最低时长均已满足',
   investigation_ready: '搜证已结束，可以推进',
+  clue_acquired: 'AI 获得一条线索',
+  no_new_clue: 'AI 本次没有发现新线索',
+  no_investigation_locations: '当前没有可调查地点',
   discussion_ready: '玩家已准备结束讨论',
   final_vote_ready: '玩家已准备进入投票',
   all_votes_cast: '所有角色已投票',

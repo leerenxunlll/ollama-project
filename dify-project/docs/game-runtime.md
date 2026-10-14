@@ -52,6 +52,10 @@ Director 分析只由以下候选事件触发：相关阶段首次进入、出�
 | `final_discussion` | 必须由玩家确认“准备进入投票”并满足最低时长。Director 的 phase-advance 建议只记为 advisory。 |
 | `vote` | 不触发 AI 公开发言，不伪造 AI 选票。四名角色已投票且满足 Game Flow 条件后，Runtime 才可推进到 `ending`。 |
 
+在 `investigation_1` / `investigation_2`，Runtime 会在玩家尚未标记准备结束时，按确定性角色顺序执行一项 AI 搜证；同一个 Tick 不会同时搜证并推进阶段。上限由 `RuntimePolicy.ai_investigations_per_character_per_phase` 控制，默认每名 AI 每阶段一次。AI 选择第一个仍有未发现线索的合法地点；没有可调查线索时也会记录一次安全动作，避免重复空跑。玩家标记 Ready 后，Runtime 只按原规则校验时长并推进，不再继续 AI 搜证。Runtime 暂停或阶段变化后，旧 claim 不能提交搜证。
+
+新公开线索披露会形成 `public-clue-disclosure:{id}` Director 事件；Runtime 保存披露 ID 水位并使用原有冷却与 claim 机制，避免每个 Tick 重复分析同一披露。首次进入新阶段会一并消费已有披露水位，避免重复触发。私下分享不生成 Director 事件，也不会把 private Message 正文放入 DirectorContext。
+
 公共发言入口继续使用 Game Flow Manager 的 `can_public_speak` 规则。Runtime 主动发言必须针对本局 AI GameCharacter、通过 Speaker Scheduler 目标校验、满足真人静默和 AI 发言冷却。Character Context Builder 只提供该角色获准读取的信息。AI 回复过程中若游戏阶段改变，保存前会再次做阶段与 claim 检查，迟到的公开回复会被丢弃。
 
 ## API

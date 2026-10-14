@@ -30,6 +30,8 @@ def send_character_message(
         raise LookupError("Game not found")
     if game.status != "in_progress":
         raise GameRuleError("AI chat requires an in-progress game")
+    phase_at_start = game.current_phase
+    phase_started_at = game.phase_started_at
 
     human_characters = list(
         db.scalars(
@@ -106,6 +108,8 @@ def send_character_message(
         ai_message,
         reply,
         related_messages=(human_message,),
+        expected_phase=phase_at_start,
+        expected_phase_started_at=phase_started_at,
     )
     return AIChatResponse(
         human_message=MessageRead.model_validate(human_message),

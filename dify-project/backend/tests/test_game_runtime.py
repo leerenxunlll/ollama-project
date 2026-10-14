@@ -9,10 +9,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.character_agent import CharacterReply
 from app.db.base import Base
+from app.game.runtime_policy import RUNTIME_POLICY
 from app.models import (
     Character,
+    Clue,
     DirectorRecommendationRecord,
     GameCharacter,
+    GameCharacterClue,
+    GameClueDisclosure,
     GamePhaseAcknowledgement,
     GameRuntimeActionLog,
     GameRuntimeState,
@@ -29,6 +33,7 @@ from app.schemas.director import (
 )
 from app.services.character_response import persist_character_reply
 from app.services.game_runtime import (
+    _director_event,
     acknowledge_current_phase,
     mark_runtime_ready,
     pause_game_runtime,
@@ -216,7 +221,9 @@ def test_reading_phases_wait_for_acknowledgement_then_advance_once(
     assert character_agent.calls == 0
 
 
-def test_investigation_waits_for_player_readiness(db_session: Session) -> None:
+def test_investigation_allows_ai_search_before_player_readiness(
+    db_session: Session,
+) -> None:
     now = datetime.now(timezone.utc)
     game, _characters = _create_game(db_session, phase="investigation_1", now=now)
     start_game_runtime(db_session, game.id, now=now)
@@ -228,8 +235,17 @@ def test_investigation_waits_for_player_readiness(db_session: Session) -> None:
 
     waiting = run_runtime_tick(db_session, game.id, director, character_agent, now=now)
     assert waiting.phase_after == "investigation_1"
-    assert waiting.reason_code == "no_new_event"
+    assert waiting.action_type == "ai_investigation"
+    assert waiting.reason_code == "clue_acquired"
     assert director.calls == 0
+    assert (
+        db_session.scalar(
+            select(func.count(GameCharacterClue.id)).where(
+                GameCharacterClue.game_character_id == _characters[1].id
+            )
+        )
+        == 1
+    )
 
     mark_runtime_ready(db_session, game.id, now=now)
     advanced = run_runtime_tick(
@@ -242,6 +258,110 @@ def test_investigation_waits_for_player_readiness(db_session: Session) -> None:
     assert advanced.phase_after == "discussion_1"
     assert advanced.action_type == "phase_advance"
     assert director.calls == 0
+
+
+def test_investigation_tick_runs_one_bounded_ai_search_per_character(
+    db_session: Session,
+) -> None:
+    now = datetime.now(timezone.utc)
+    game, characters = _create_game(db_session, phase="investigation_1", now=now)
+    start_game_runtime(db_session, game.id, now=now)
+    state = db_session.get(GameRuntimeState, game.id)
+    state.last_processed_phase_started_at = game.phase_started_at
+    db_session.commit()
+    director = StubDirector(_recommendation(DirectorAction.no_action))
+    character_agent = StubCharacter()
+
+    results = [
+        run_runtime_tick(
+            db_session,
+            game.id,
+            director,
+            character_agent,
+            now=now + timedelta(seconds=index),
+        )
+        for index in range(3)
+    ]
+    repeated = run_runtime_tick(
+        db_session,
+        game.id,
+        director,
+        character_agent,
+        now=now + timedelta(seconds=4),
+    )
+
+    for result in results:
+        assert result.action_type == "ai_investigation"
+    assert repeated.reason_code == "no_new_event"
+    assert director.calls == 0
+    assert character_agent.calls == 0
+    for character in characters[1:]:
+        assert (
+            db_session.scalar(
+                select(func.count(GameCharacterClue.id)).where(
+                    GameCharacterClue.game_character_id == character.id
+                )
+            )
+            == 1
+        )
+    assert (
+        db_session.scalar(
+            select(func.count(GameCharacterClue.id)).where(
+                GameCharacterClue.game_character_id == characters[0].id
+            )
+        )
+        == 0
+    )
+
+
+def test_failed_ai_investigation_is_logged_and_not_retried(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime.now(timezone.utc)
+    game, characters = _create_game(db_session, phase="investigation_1", now=now)
+    start_game_runtime(db_session, game.id, now=now)
+    state = db_session.get(GameRuntimeState, game.id)
+    state.last_processed_phase_started_at = game.phase_started_at
+    db_session.commit()
+    director = StubDirector(_recommendation(DirectorAction.no_action))
+    character_agent = StubCharacter()
+    attempted_character_ids: list[int] = []
+
+    def fail_search(_db, _game_id, character_id, *_args, **_kwargs):
+        attempted_character_ids.append(character_id)
+        raise RuntimeError("search failed")
+
+    monkeypatch.setattr("app.services.game_runtime.search_for_ai", fail_search)
+
+    results = [
+        run_runtime_tick(
+            db_session,
+            game.id,
+            director,
+            character_agent,
+            now=now + timedelta(seconds=index),
+        )
+        for index in range(3)
+    ]
+    exhausted = run_runtime_tick(
+        db_session,
+        game.id,
+        director,
+        character_agent,
+        now=now + timedelta(seconds=4),
+    )
+
+    assert attempted_character_ids == [character.id for character in characters[1:]]
+    assert all(result.execution_status == "failed" for result in results)
+    assert exhausted.reason_code == "no_new_event"
+    failure_logs = db_session.scalars(
+        select(GameRuntimeActionLog).where(
+            GameRuntimeActionLog.game_session_id == game.id,
+            GameRuntimeActionLog.action_type == "ai_investigation",
+        )
+    ).all()
+    assert len(failure_logs) == 3
+    assert all(log.execution_status == "failed" for log in failure_logs)
 
 
 def test_active_human_discussion_defers_director_phase_advance(
@@ -396,6 +516,50 @@ def test_runtime_event_is_deduplicated_and_cooldown_applies(
     )
     assert cooldown.reason_code == "cooldown_active"
     assert director.calls == 1
+
+
+def test_public_clue_disclosure_event_is_consumed_once(db_session: Session) -> None:
+    now = datetime.now(timezone.utc)
+    game, characters = _create_game(db_session, now=now)
+    start_game_runtime(db_session, game.id, now=now)
+    state = db_session.get(GameRuntimeState, game.id)
+    state.last_processed_phase_started_at = game.phase_started_at
+    clue = db_session.scalar(
+        select(Clue.id).where(Clue.script_id == game.script_id).limit(1)
+    )
+    assert clue is not None
+    message = Message(
+        game_session_id=game.id,
+        sender_game_character_id=characters[0].id,
+        channel_type="public",
+        content="我决定公开这条线索。",
+        created_at=now,
+    )
+    db_session.add(message)
+    db_session.flush()
+    disclosure = GameClueDisclosure(
+        game_session_id=game.id,
+        clue_id=clue,
+        source_game_character_id=characters[0].id,
+        visibility="public",
+        target_game_character_id=None,
+        related_message_id=message.id,
+    )
+    db_session.add(disclosure)
+    db_session.flush()
+    state.last_processed_public_message_id = message.id
+    db_session.commit()
+
+    event = _director_event(db_session, game, state, now, RUNTIME_POLICY)
+
+    assert event is not None
+    event_key, event_type, watermark_updates = event
+    assert event_key == f"public-clue-disclosure:{disclosure.id}"
+    assert event_type == "public_clue_disclosure"
+    for field, value in watermark_updates.items():
+        setattr(state, field, value)
+    db_session.commit()
+    assert _director_event(db_session, game, state, now, RUNTIME_POLICY) is None
 
 
 def test_vote_never_autocompletes_and_only_advances_after_four_votes(

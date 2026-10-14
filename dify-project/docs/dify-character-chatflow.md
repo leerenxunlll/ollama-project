@@ -1,6 +1,6 @@
 # Dify Character Chatflow 配置
 
-Phase 5 将 Character Chatflow 的输出从单独台词升级为结构化 JSON。Phase 6 继续使用同一个 Character Chatflow；后端通过 `character_context` 和 `interaction_context` 提供角色可见信息及交互模式。Dify 仍只负责生成角色回复；后端负责校验、权限判断、调用顺序和持久化。
+Phase 5 将 Character Chatflow 的输出从单独台词升级为结构化 JSON。Phase 6 继续使用同一个 Character Chatflow；后端通过 `character_context` 和 `interaction_context` 提供角色可见信息及交互模式。Phase 10 为输出增加可选 `clue_disclosure_intent`，请求后端正式披露当前角色已经知道的线索；Dify 仍不拥有游戏事实或权限。
 
 ## 更新现有 Chatflow
 
@@ -39,7 +39,10 @@ Phase 8A 仍使用现有 Character Chatflow，不创建新 Dify App。后端传�
 | `character_script_chapters` | 预设给当前角色的经历、秘密和阶段目标 | 作为该角色独有的背景知识；不得转发其他角色 Context 内容，因为它不会被提供 |
 | `memories` | 角色在本局互动中形成的主观记忆 | 可能有误，应视为角色的看法，不等于案件真相 |
 | `inner_os` / Thought | 某次 AI 回复的短暂私有内心独白 | 当前仍不自动注入后续 Context；不得伪装成公开对话 |
-| `known_clues` | 后端搜证后正式授予该角色的线索 | 只代表已获得线索；阅读故事章节不会自动增加它 |
+| `acquired_clues` | 该角色亲自搜证获得的线索 | 代表直接搜证，不包含分享所得 |
+| `known_via_share_clues` | 正式私下分享给该角色的线索 | 代表知道内容，不代表角色亲自搜到 |
+| `publicly_disclosed_clues` | 已正式向全局公开的线索 | 所有角色都能看到，但不代表亲自搜到 |
+| `known_clues` | 后端按权限构造的兼容汇总列表 | 只包含当前角色合法知道的线索；不能据此推断其他线索 |
 
 权限由 FastAPI 的 CharacterContextBuilder 实施，而不是依赖本节提示词。Director 使用独立的 DirectorContext，可获知全部预设章节与剧本真相；Character Chatflow 不会收到 DirectorContext，也不会因为复用同一个 Dify 应用而继承 Director 权限。Memory 与 Thought 仍不会加入 DirectorContext。
 
@@ -100,6 +103,27 @@ Phase 8A 仍使用现有 Character Chatflow，不创建新 Dify App。后端传�
         },
         "required": ["content", "importance"]
       }
+    },
+    "clue_disclosure_intent": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "clue_id": { "type": "integer", "minimum": 1 },
+            "visibility": { "type": "string", "enum": ["private", "public"] },
+            "target_game_character_id": {
+              "anyOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["clue_id", "visibility"]
+        },
+        { "type": "null" }
+      ],
+      "default": null
     }
   },
   "required": ["speech", "inner_os", "emotion", "intent", "memory_updates"]
@@ -146,10 +170,12 @@ Answer 示例（Answer 内容只返回 JSON 本身）：
 3. emotion 表示本轮结束时角色的主要情绪，只能使用 Schema 列出的值。
 4. intent 描述这轮的行为目的，只能使用 Schema 列出的值。它只是描述，不会执行游戏动作。
 5. memory_updates 只记录会影响未来行为的重要信息，例如玩家透露的重要事实、形成的怀疑、承诺或重要关系变化。不要记录每句话；没有重要内容时返回空数组。
-6. 不得创造、宣布或授予正式线索，不得改变案件真相、GameSession 状态或当前阶段。
-7. 不得输出 Markdown、code fence、前言、解释或 Schema 外的字段。
-8. 将已解锁章节当作预设经历；Memory 是角色在本局形成的主观看法，不能据此改写章节或案件真相。
-9. 不得声称知道当前 `character_context` 中没有提供的未来章节、其他角色私人经历或 Director 专属真相。
+6. `acquired_clues` 表示亲自搜证，`known_via_share_clues` 表示别人正式私下告知，`publicly_disclosed_clues` 表示全局公开；`known_clues` 是兼容汇总。不要把 Memory、自由聊天或猜测当成正式线索。
+7. `clue_disclosure_intent` 没有正式分享时返回 null。正式分享最多一条，只能引用当前角色合法知道的 clue_id；public 的 target 必须为 null，private 必须填写同局其他角色的 ID。只有 `interaction_context.channel` 为 `public` 时才可请求 public 披露；Backend 会重新校验。
+8. 不得创建或修改 Canonical Clue、案件真相、GameSession 状态或当前阶段。speech 中的谎言或猜测不会修改证据事实。
+9. 不得输出 Markdown、code fence、前言、解释或 Schema 外的字段。
+10. 将已解锁章节当作预设经历；Memory 是角色在本局形成的主观看法，不能据此改写章节或案件真相。
+11. 不得声称知道当前 `character_context` 中没有提供的未来章节、其他角色私人经历或 Director 专属真相。
 ```
 
 ## 后端请求与校验边界
@@ -160,4 +186,4 @@ Dify Client 只处理 HTTP。Character Agent 从 Answer 读取 JSON 并使用后
 
 成功时普通聊天响应只包含玩家消息与角色 `speech`。`inner_os` 和 `memory_updates` 不进入普通消息；它们由后端在同一事务里保存到 `CharacterThought` 与 `CharacterMemory`。开发调试 API 仅在 `APP_ENV=development` 开放。
 
-Structured Output 和 System Instruction 都不是信息安全边界。权限隔离必须由 FastAPI 后端构造角色专属 Context；普通角色上下文不得包含完整剧本真相、其他角色私密记忆或内心状态。不要在 Dify 工具中添加修改游戏状态、推进阶段或发放线索的能力。
+Structured Output 和 System Instruction 都不是信息安全边界。权限隔离必须由 FastAPI 后端构造角色专属 Context；普通角色上下文不得包含完整剧本真相、其他角色私密记忆或内心状态。不要在 Dify 工具中添加修改游戏状态、推进阶段、创建线索或直接发放线索的能力。披露字段说明、完整新版 Prompt 与测试样例见 [Phase 10 Character Evidence 更新教程](dify-character-evidence-update.md)。

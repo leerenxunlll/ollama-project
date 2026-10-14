@@ -8,6 +8,7 @@ from app.schemas.ai import (
     CharacterEmotion,
     CharacterIntent,
     CharacterModelOutput,
+    ClueDisclosureIntent,
     MemoryUpdate,
 )
 from app.schemas.context import CharacterContext
@@ -26,6 +27,7 @@ class CharacterReply(BaseModel):
     emotion: CharacterEmotion
     intent: CharacterIntent
     memory_updates: list[MemoryUpdate]
+    clue_disclosure_intent: ClueDisclosureIntent | None = None
 
 
 def parse_character_reply(answer: str) -> CharacterReply:

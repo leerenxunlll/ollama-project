@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -86,6 +87,9 @@ class GameSession(Base):
     runtime_actions: Mapped[list["GameRuntimeActionLog"]] = relationship(
         back_populates="game_session"
     )
+    clue_disclosures: Mapped[list["GameClueDisclosure"]] = relationship(
+        back_populates="game_session"
+    )
 
 
 class GameCharacter(Base):
@@ -132,6 +136,14 @@ class GameCharacter(Base):
     clue_discoveries: Mapped[list["GameCharacterClue"]] = relationship(
         back_populates="game_character"
     )
+    clue_disclosures_sent: Mapped[list["GameClueDisclosure"]] = relationship(
+        back_populates="source_game_character",
+        foreign_keys="GameClueDisclosure.source_game_character_id",
+    )
+    clue_disclosures_received: Mapped[list["GameClueDisclosure"]] = relationship(
+        back_populates="target_game_character",
+        foreign_keys="GameClueDisclosure.target_game_character_id",
+    )
     thoughts: Mapped[list["CharacterThought"]] = relationship(
         back_populates="game_character",
         foreign_keys="CharacterThought.game_character_id",
@@ -176,6 +188,47 @@ class GameCharacterClue(Base):
     clue: Mapped["Clue"] = relationship(back_populates="game_character_clues")
 
 
+class GameCharacterClueKnowledge(Base):
+    """One clue known by a runtime character, with its first known source."""
+
+    __tablename__ = "game_character_clue_knowledge"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_session_id",
+            "game_character_id",
+            "clue_id",
+            name="uq_game_character_clue_knowledge",
+        ),
+        CheckConstraint(
+            "knowledge_source IN ('direct_acquisition', 'private_disclosure', "
+            "'public_disclosure')",
+            name="ck_game_character_clue_knowledge_source",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_game_character_clue_knowledge_character_session",
+        ),
+        Index("ix_game_character_clue_knowledge_clue", "game_session_id", "clue_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), nullable=False
+    )
+    game_character_id: Mapped[int] = mapped_column(nullable=False)
+    clue_id: Mapped[int] = mapped_column(ForeignKey("clues.id"), nullable=False)
+    knowledge_source: Mapped[str] = mapped_column(String(30), nullable=False)
+    source_disclosure_id: Mapped[int | None] = mapped_column(
+        ForeignKey("game_clue_disclosures.id"), nullable=True
+    )
+    first_known_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class Vote(Base):
     """One final vote cast by a runtime character in a game session."""
 
@@ -214,7 +267,6 @@ class Vote(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-
     game_session: Mapped["GameSession"] = relationship(back_populates="votes")
     voter_game_character: Mapped["GameCharacter"] = relationship(
         back_populates="votes_cast",
@@ -550,6 +602,9 @@ class GameRuntimeState(Base):
         DateTime(timezone=True), nullable=True
     )
     last_processed_public_message_id: Mapped[int | None] = mapped_column(nullable=True)
+    last_processed_public_clue_disclosure_id: Mapped[int | None] = mapped_column(
+        nullable=True
+    )
     last_processed_phase_started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -652,3 +707,126 @@ class GameRuntimeActionLog(Base):
     )
 
     game_session: Mapped["GameSession"] = relationship(back_populates="runtime_actions")
+
+
+class GameClueDisclosure(Base):
+    """A formal, traceable private or public disclosure of a known clue."""
+
+    __tablename__ = "game_clue_disclosures"
+    __table_args__ = (
+        CheckConstraint(
+            "visibility IN ('private', 'public')",
+            name="ck_game_clue_disclosures_visibility",
+        ),
+        CheckConstraint(
+            "(visibility = 'private' AND target_game_character_id IS NOT NULL) "
+            "OR (visibility = 'public' AND target_game_character_id IS NULL)",
+            name="ck_game_clue_disclosures_target_visibility",
+        ),
+        CheckConstraint(
+            "target_game_character_id IS NULL OR "
+            "target_game_character_id != source_game_character_id",
+            name="ck_game_clue_disclosures_not_self",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "source_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_game_clue_disclosures_source_session",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "target_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_game_clue_disclosures_target_session",
+        ),
+        UniqueConstraint(
+            "game_session_id", "client_request_id", name="uq_clue_disclosure_request"
+        ),
+        Index(
+            "uq_public_clue_disclosure",
+            "game_session_id",
+            "clue_id",
+            unique=True,
+            sqlite_where=text("visibility = 'public'"),
+        ),
+        Index(
+            "uq_private_clue_disclosure",
+            "game_session_id",
+            "clue_id",
+            "source_game_character_id",
+            "target_game_character_id",
+            unique=True,
+            sqlite_where=text("visibility = 'private'"),
+        ),
+        Index("ix_game_clue_disclosures_game_created", "game_session_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), nullable=False
+    )
+    clue_id: Mapped[int] = mapped_column(ForeignKey("clues.id"), nullable=False)
+    source_game_character_id: Mapped[int] = mapped_column(nullable=False)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_game_character_id: Mapped[int | None] = mapped_column(nullable=True)
+    related_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id"), nullable=True
+    )
+    client_request_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    game_session: Mapped["GameSession"] = relationship(
+        back_populates="clue_disclosures"
+    )
+    clue: Mapped["Clue"] = relationship()
+    source_game_character: Mapped["GameCharacter"] = relationship(
+        back_populates="clue_disclosures_sent",
+        foreign_keys=[game_session_id, source_game_character_id],
+        overlaps="game_session,clue_disclosures",
+    )
+    target_game_character: Mapped["GameCharacter | None"] = relationship(
+        back_populates="clue_disclosures_received",
+        foreign_keys=[game_session_id, target_game_character_id],
+        overlaps="game_session,clue_disclosures,source_game_character",
+    )
+    related_message: Mapped["Message | None"] = relationship()
+
+
+class GameClueDisclosureAttempt(Base):
+    """Safe audit of one rejected structured AI disclosure intent."""
+
+    __tablename__ = "game_clue_disclosure_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_session_id", "message_id", name="uq_clue_disclosure_attempt_message"
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "message_id", "game_character_id"],
+            [
+                "messages.game_session_id",
+                "messages.id",
+                "messages.sender_game_character_id",
+            ],
+            name="fk_clue_disclosure_attempt_message_sender",
+        ),
+        Index(
+            "ix_clue_disclosure_attempt_game_created", "game_session_id", "created_at"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), nullable=False
+    )
+    game_character_id: Mapped[int] = mapped_column(nullable=False)
+    message_id: Mapped[int] = mapped_column(nullable=False)
+    requested_clue_id: Mapped[int | None] = mapped_column(nullable=True)
+    reason_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

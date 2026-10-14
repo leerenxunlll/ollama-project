@@ -11,6 +11,7 @@ from app.models import (
     CharacterScriptChapter,
     GameCharacter,
     GameCharacterClue,
+    GameClueDisclosure,
     GameSession,
     Message,
     Script,
@@ -101,6 +102,19 @@ def build_director_context(
     for clue_id, character_id in acquisition_rows:
         acquired_by_clue.setdefault(clue_id, []).append(character_id)
 
+    disclosure_counts = db.execute(
+        select(
+            GameClueDisclosure.clue_id,
+            GameClueDisclosure.visibility,
+            func.count(GameClueDisclosure.id),
+        )
+        .where(GameClueDisclosure.game_session_id == game.id)
+        .group_by(GameClueDisclosure.clue_id, GameClueDisclosure.visibility)
+    ).all()
+    disclosure_counts_by_clue: dict[int, dict[str, int]] = {}
+    for clue_id, visibility, count in disclosure_counts:
+        disclosure_counts_by_clue.setdefault(clue_id, {})[visibility] = count
+
     phase_act = INVESTIGATION_ACTS.get(game.current_phase)
     clue_facts = [
         DirectorClueFact(
@@ -141,6 +155,15 @@ def build_director_context(
                 phase_act is not None and clue.act == phase_act
             ),
             acquired_by_game_character_ids=sorted(acquired_by_clue.get(clue.id, [])),
+            publicly_disclosed=(
+                disclosure_counts_by_clue.get(clue.id, {}).get("public", 0) > 0
+            ),
+            public_disclosure_count=disclosure_counts_by_clue.get(clue.id, {}).get(
+                "public", 0
+            ),
+            private_disclosure_count=disclosure_counts_by_clue.get(clue.id, {}).get(
+                "private", 0
+            ),
         )
         for clue in sorted(script.clues, key=lambda item: item.id)
     ]

@@ -40,6 +40,13 @@ from app.schemas.ai import (
     PublicTurnResponse,
 )
 from app.schemas.context import CharacterContext
+from app.schemas.evidence import (
+    ClueDisclosureRead,
+    ClueHistoryEventRead,
+    ClueShareRequest,
+    MyClueStateRead,
+    PublicCluesRead,
+)
 from app.schemas.flow import GameFlowState, VoteCreate, VoteRead, VoteResultRead
 from app.schemas.game import (
     CharacterSelection,
@@ -57,6 +64,12 @@ from app.schemas.game import (
 from app.schemas.story import IntroAcknowledgementRead, ScriptChapterRead
 from app.services.character_chat import send_character_message
 from app.services.character_context import build_character_context
+from app.services.evidence import (
+    get_clue_history,
+    get_my_clues,
+    get_public_clues,
+    share_clue,
+)
 from app.services.game_flow import create_vote, get_game_flow_state, get_vote_result
 from app.services.gameplay import (
     advance_game_phase,
@@ -354,14 +367,62 @@ def search_investigation_location(
     payload: InvestigationSearch,
     db: Session = Depends(get_db),
 ) -> InvestigationResultRead:
-    """Apply one deterministic clue search for a character in this game."""
+    """Apply one deterministic clue search for the selected Human character."""
     try:
         return search_location(
             db,
             game_id,
-            payload.game_character_id,
             payload.location,
+            payload.game_character_id,
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/me/clues", response_model=MyClueStateRead)
+def read_my_clues(game_id: int, db: Session = Depends(get_db)) -> MyClueStateRead:
+    """Return clues authorized for the one Human character in this local game."""
+    try:
+        return get_my_clues(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/clues/public", response_model=PublicCluesRead)
+def read_public_clues(game_id: int, db: Session = Depends(get_db)) -> PublicCluesRead:
+    """Return canonical clues which have been formally disclosed publicly."""
+    try:
+        return get_public_clues(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/clues/events", response_model=list[ClueHistoryEventRead])
+def read_clue_events(
+    game_id: int, db: Session = Depends(get_db)
+) -> list[ClueHistoryEventRead]:
+    """Return only public events and private events involving the Human."""
+    try:
+        return get_clue_history(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/games/{game_id}/clues/share", response_model=ClueDisclosureRead)
+def create_clue_disclosure(
+    game_id: int,
+    payload: ClueShareRequest,
+    db: Session = Depends(get_db),
+) -> ClueDisclosureRead:
+    """Share a known clue as the server-resolved Human character."""
+    try:
+        return share_clue(db, game_id, payload)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except GameRuleError as error:

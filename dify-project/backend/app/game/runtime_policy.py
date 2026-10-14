@@ -10,13 +10,14 @@ RUNTIME_READY_PHASES = INVESTIGATION_PHASES | DISCUSSION_PHASES | {"final_discus
 
 @dataclass(frozen=True)
 class RuntimePolicy:
-    """One place for bounded scheduling intervals and recovery lease."""
+    """One place for bounded scheduling intervals, actions, and recovery lease."""
 
     director_analysis_cooldown_seconds: int = 50
     proactive_speech_cooldown_seconds: int = 60
     human_inactivity_threshold_seconds: int = 60
     runtime_tick_interval_seconds: int = 10
     action_lease_seconds: int = 240
+    ai_investigations_per_character_per_phase: int = 1
 
 
 RUNTIME_POLICY = RuntimePolicy()

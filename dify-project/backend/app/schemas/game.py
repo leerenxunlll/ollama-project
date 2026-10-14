@@ -68,9 +68,9 @@ class InvestigationLocationsRead(BaseModel):
 
 
 class InvestigationSearch(BaseModel):
-    """Search one location on behalf of a runtime character."""
+    """Search one location on behalf of the selected Human character."""
 
-    game_character_id: int
+    game_character_id: int | None = None
     location: str = Field(min_length=1)
 
 

@@ -1,6 +1,6 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。Phase 0–8C 已完成；当前 Phase 9 增加受控 Runtime Orchestrator，在玩家页面活跃时按需协调现有 Director 与 Character Agent。Writer 生成的内容必须经过审核和显式批准，才会创建正式 Script。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。Phase 0–9 已完成；当前 Phase 10 增加受控搜证、线索知识来源、线索披露与有界 AI 调查。Writer 生成的内容必须经过审核和显式批准，才会创建正式 Script。
 
 ## Phase 3 已完成
 
@@ -101,6 +101,14 @@ Runtime 使用客户端定时 Tick，不运行后台 worker。每个 Tick 通过
 
 Runtime 复用现有 Game Flow Manager、Director Recommendation Apply、Speaker Scheduler、Character Context Builder 和 Character Agent。SQLite migration 会新增 Runtime 状态、阶段确认和安全动作日志，并为 Director Recommendation 保存其来源阶段。升级已有数据库时，先在项目根目录执行 `alembic -c backend/alembic.ini upgrade head`；启动时 `create_all()` 不会迁移现有表。完整策略、API、并发认领与浏览器关闭时的行为见 [Game Runtime 说明](docs/game-runtime.md)。
 
+## Phase 10：搜证与线索共享
+
+正式线索始终来自已发布 Script 的 `Clue`。调查只允许在 `investigation_1` / `investigation_2`，由服务端按地点确定性地授予一条线索。`GameCharacterClue` 代表角色亲自搜得；`GameCharacterClueKnowledge` 另行记录因搜证、私下分享或公开披露而知道的信息。显式披露与对应消息同事务保存，普通聊天中的说法不会改变正式线索状态。
+
+Development 页新增 Investigation & Evidence Panel，分开展示亲自搜得、私下收到和已经公开的线索，并支持调查、私下分享、公开展示与可见事件记录。Runtime 在调查阶段每次 Tick 最多安排一次 AI 搜证，默认每名 AI 每阶段最多一次，地点选择是程序确定性策略，不是 LLM 自主调查。Character Context 只提供当前角色合法已知线索；Director 只读公开披露状态与客观进度，不读私人披露正文。
+
+Character Dify Structured Output 增加可选 `clue_disclosure_intent`，本地兼容旧输出。更新云端 Chatflow 需按 [Character 线索披露更新指南](docs/dify-character-evidence-update.md) 手动修改并发布；在用户更新前，不声称真实 Dify AI 披露联调通过。数据库升级命令为 `alembic -c backend/alembic.ini upgrade head`；Phase 10 migration 会保留现有搜证记录并回填直接知识。完整边界、API 与幂等规则见 [线索共享说明](docs/evidence-sharing.md)。
+
 ## 技术栈
 
 | 部分 | 技术 |
@@ -121,9 +129,9 @@ Runtime 复用现有 Game Flow Manager、Director Recommendation Apply、Speaker
 │   │   ├── core/               # 应用配置
 │   │   ├── db/                 # Engine、Session、Base、建表
 │   │   ├── game/               # 状态转换、流程管理、speaker scheduling 与角色分配
-│   │   ├── models/             # SQLAlchemy 模型、隔离的 Draft、审查与真相数据
-│   │   ├── schemas/            # API、角色 Context 与严格 Writer/Quality 输出结构
-│   │   ├── services/           # 对话、章节、Draft 审查、修订和发布
+│   │   ├── models/             # SQLAlchemy 模型、隔离 Draft、线索知识与披露记录
+│   │   ├── schemas/            # API、角色 Context 与各 Dify 输出结构
+│   │   ├── services/           # 对话、搜证、权限过滤、分享、Draft 审查和发布
 │   │   ├── main.py             # FastAPI 应用入口
 │   │   └── seed.py             # 开发数据命令入口
 │   ├── migrations/             # Alembic 数据库迁移
@@ -137,9 +145,12 @@ Runtime 复用现有 Game Flow Manager、Director Recommendation Apply、Speaker
 │   ├── dify-director-workflow.md # Director Workflow 输入输出契约
 │   ├── dify-writer-workflow.md   # Writer Workflow 完整配置、Schema 与 Prompt
 │   ├── dify-script-quality-workflow.md # Quality Workflow 配置、Schema 与 smoke 步骤
+│   ├── dify-character-evidence-update.md # Character 线索披露 Schema 与 Prompt 更新
+│   ├── evidence-sharing.md    # 线索来源、权限、API 与幂等规则
+│   ├── game-runtime.md        # Runtime 调度、策略、API 与恢复
 │   └── script-content-design.md # 公共和私人章节设计、解锁与知识权限
 ├── frontend/
-│   ├── src/                    # React 页面、Writer Draft Debug、API 客户端与样式
+│   ├── src/                    # React 页面、搜证分享面板、Draft Debug、API 与样式
 │   ├── package.json
 │   └── vite.config.ts          # /api 开发代理
 ├── .env.example
@@ -278,7 +289,11 @@ Writer 真实 smoke 仅使用 Development Writer Draft Debug 页面逐步运行�
 | POST | `/api/games/{game_id}/director/analyze` | Development only：基于隔离后的 DirectorContext 分析并保存建议 |
 | POST | `/api/games/{game_id}/director/recommendations/{recommendation_id}/apply` | Development only：验证并申请执行、拒绝或标记为 advisory |
 | GET | `/api/games/{game_id}/investigation/locations` | 读取当前调查阶段的线索地点 |
-| POST | `/api/games/{game_id}/investigation/search` | 为本局角色确定性地授予一条新线索 |
+| POST | `/api/games/{game_id}/investigation/search` | 由后端识别 Human 并确定性地授予一条新线索 |
+| GET | `/api/games/{game_id}/me/clues` | 分组读取 Human 亲自获得、私下收到及公开可知的线索 |
+| GET | `/api/games/{game_id}/clues/public` | 读取本局正式公开的 Canonical Clue |
+| GET | `/api/games/{game_id}/clues/events` | 读取 Human 有权看到的搜证与分享事件 |
+| POST | `/api/games/{game_id}/clues/share` | 将已知线索私下分享给同局 AI 或公开展示；`client_request_id` 幂等 |
 | POST | `/api/games/{game_id}/messages` | 创建 public/private 消息；system 消息仅由后端产生 |
 
 当前没有登录认证；`/me/character` 与 `/me/story` 依据 GameSession 中唯一的 `human` 角色返回信息，因此不能替代真实用户身份校验。Context、Thought、完整投票结果和 Director 调试 API 仅供开发环境使用。Director Analyze 由开发者手动触发，不会自动推进流程。

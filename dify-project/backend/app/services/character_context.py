@@ -1,5 +1,7 @@
 """Build permission-filtered context for one game character."""
 
+from datetime import datetime
+
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
@@ -11,6 +13,8 @@ from app.models import (
     Clue,
     GameCharacter,
     GameCharacterClue,
+    GameCharacterClueKnowledge,
+    GameClueDisclosure,
     GameSession,
     Message,
     SharedScriptChapter,
@@ -114,7 +118,7 @@ def build_character_context(
     public_messages.reverse()
     private_messages.reverse()
 
-    clue_rows = db.execute(
+    acquired_rows = db.execute(
         select(GameCharacterClue, Clue)
         .join(Clue, Clue.id == GameCharacterClue.clue_id)
         .where(
@@ -123,6 +127,76 @@ def build_character_context(
         )
         .order_by(GameCharacterClue.discovered_at, GameCharacterClue.id)
     ).all()
+    knowledge_rows = db.execute(
+        select(
+            GameCharacterClueKnowledge,
+            Clue,
+            GameClueDisclosure.source_game_character_id,
+        )
+        .join(Clue, Clue.id == GameCharacterClueKnowledge.clue_id)
+        .outerjoin(
+            GameClueDisclosure,
+            GameClueDisclosure.id == GameCharacterClueKnowledge.source_disclosure_id,
+        )
+        .where(
+            GameCharacterClueKnowledge.game_session_id == game.id,
+            GameCharacterClueKnowledge.game_character_id == current_character.id,
+            Clue.script_id == game.script_id,
+        )
+        .order_by(
+            GameCharacterClueKnowledge.first_known_at,
+            GameCharacterClueKnowledge.id,
+        )
+    ).all()
+    public_disclosure_rows = db.execute(
+        select(GameClueDisclosure, Clue)
+        .join(Clue, Clue.id == GameClueDisclosure.clue_id)
+        .where(
+            GameClueDisclosure.game_session_id == game.id,
+            GameClueDisclosure.visibility == "public",
+            Clue.script_id == game.script_id,
+        )
+        .order_by(GameClueDisclosure.created_at, GameClueDisclosure.id)
+    ).all()
+    known_clues_by_id = {
+        clue.id: _context_clue(
+            clue,
+            knowledge_source=knowledge.knowledge_source,
+            first_known_at=knowledge.first_known_at,
+            source_game_character_id=source_character_id,
+            discovered_at=(
+                knowledge.first_known_at
+                if knowledge.knowledge_source == "direct_acquisition"
+                else None
+            ),
+            source=knowledge.knowledge_source,
+        )
+        for knowledge, clue, source_character_id in knowledge_rows
+    }
+    for discovery, clue in acquired_rows:
+        known_clues_by_id.setdefault(
+            clue.id,
+            _context_clue(
+                clue,
+                knowledge_source="direct_acquisition",
+                first_known_at=discovery.discovered_at,
+                source_game_character_id=current_character.id,
+                discovered_at=discovery.discovered_at,
+                source=discovery.source,
+            ),
+        )
+    for disclosure, clue in public_disclosure_rows:
+        known_clues_by_id.setdefault(
+            clue.id,
+            _context_clue(
+                clue,
+                knowledge_source="public_disclosure",
+                first_known_at=disclosure.created_at,
+                source_game_character_id=disclosure.source_game_character_id,
+                discovered_at=None,
+                source="public_disclosure",
+            ),
+        )
     memories = list(
         db.scalars(
             select(CharacterMemory)
@@ -195,19 +269,40 @@ def build_character_context(
         ],
         public_messages=[_context_message(message) for message in public_messages],
         private_messages=[_context_message(message) for message in private_messages],
-        known_clues=[
-            ContextClue(
-                clue_id=clue.id,
-                name=clue.name,
-                description=clue.description,
-                act=clue.act,
-                location=clue.location,
-                is_core=clue.is_core,
-                importance=clue.importance,
+        known_clues=list(known_clues_by_id.values()),
+        acquired_clues=[
+            _context_clue(
+                clue,
+                knowledge_source="direct_acquisition",
+                first_known_at=discovery.discovered_at,
+                source_game_character_id=current_character.id,
                 discovered_at=discovery.discovered_at,
                 source=discovery.source,
             )
-            for discovery, clue in clue_rows
+            for discovery, clue in acquired_rows
+        ],
+        known_via_share_clues=[
+            _context_clue(
+                clue,
+                knowledge_source=knowledge.knowledge_source,
+                first_known_at=knowledge.first_known_at,
+                source_game_character_id=source_character_id,
+                discovered_at=None,
+                source=knowledge.knowledge_source,
+            )
+            for knowledge, clue, source_character_id in knowledge_rows
+            if knowledge.knowledge_source == "private_disclosure"
+        ],
+        publicly_disclosed_clues=[
+            _context_clue(
+                clue,
+                knowledge_source="public_disclosure",
+                first_known_at=disclosure.created_at,
+                source_game_character_id=disclosure.source_game_character_id,
+                discovered_at=None,
+                source="public_disclosure",
+            )
+            for disclosure, clue in public_disclosure_rows
         ],
         memories=[
             ContextMemory(
@@ -235,6 +330,32 @@ def _context_message(message: Message) -> ContextMessage:
         receiver_game_character_id=message.receiver_game_character_id,
         content=message.content,
         created_at=message.created_at,
+    )
+
+
+def _context_clue(
+    clue: Clue,
+    *,
+    knowledge_source: str,
+    first_known_at: datetime,
+    source_game_character_id: int | None,
+    discovered_at: datetime | None,
+    source: str | None,
+) -> ContextClue:
+    """Build one clue view without treating a share as a direct discovery."""
+    return ContextClue(
+        clue_id=clue.id,
+        name=clue.name,
+        description=clue.description,
+        act=clue.act,
+        location=clue.location,
+        is_core=clue.is_core,
+        importance=clue.importance,
+        discovered_at=discovered_at,
+        source=source,
+        knowledge_source=knowledge_source,
+        first_known_at=first_known_at,
+        source_game_character_id=source_game_character_id,
     )
 
 
