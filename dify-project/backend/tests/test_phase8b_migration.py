@@ -24,7 +24,7 @@ def alembic_config() -> Config:
     return Config(str(project_root / "alembic.ini"))
 
 
-def test_empty_database_upgrades_to_phase8b_head(tmp_path, monkeypatch) -> None:
+def test_empty_database_upgrades_to_current_head(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "empty-writer.db"
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{database_path}")
     config = alembic_config()
@@ -38,7 +38,7 @@ def test_empty_database_upgrades_to_phase8b_head(tmp_path, monkeypatch) -> None:
             connection.exec_driver_sql(
                 "SELECT version_num FROM alembic_version"
             ).scalar_one()
-            == "20261013_phase10_evidence"
+            == "20261015_phase11_voting_replay"
         )
         tables = {
             row[0]

@@ -68,6 +68,9 @@ class GameSession(Base):
         back_populates="game_session"
     )
     messages: Mapped[list["Message"]] = relationship(back_populates="game_session")
+    resolution: Mapped["GameResolution | None"] = relationship(
+        back_populates="game_session", uselist=False
+    )
     character_thoughts: Mapped[list["CharacterThought"]] = relationship(
         back_populates="game_session"
     )
@@ -175,6 +178,7 @@ class GameCharacterClue(Base):
         ForeignKey("game_characters.id"), nullable=False
     )
     clue_id: Mapped[int] = mapped_column(ForeignKey("clues.id"), nullable=False)
+    phase: Mapped[str | None] = mapped_column(String(40), nullable=True)
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -262,6 +266,7 @@ class Vote(Base):
     )
     voter_game_character_id: Mapped[int] = mapped_column(nullable=False)
     target_game_character_id: Mapped[int] = mapped_column(nullable=False)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -278,6 +283,57 @@ class Vote(Base):
         foreign_keys=[game_session_id, target_game_character_id],
         overlaps="game_session,votes,voter_game_character",
     )
+
+
+class GameResolution(Base):
+    """One authoritative, immutable result for a fully voted game."""
+
+    __tablename__ = "game_resolutions"
+    __table_args__ = (
+        CheckConstraint(
+            "vote_result IN ('culprit_identified', 'wrong_accusation', 'tie')",
+            name="ck_game_resolutions_vote_result",
+        ),
+        CheckConstraint(
+            "case_outcome IN ('culprit_identified', 'wrong_accusation', 'tie')",
+            name="ck_game_resolutions_case_outcome",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "culprit_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_game_resolutions_culprit_session",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "accused_game_character_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_game_resolutions_accused_session",
+        ),
+        ForeignKeyConstraint(
+            ["game_session_id", "human_vote_target_id"],
+            ["game_characters.game_session_id", "game_characters.id"],
+            name="fk_game_resolutions_human_target_session",
+        ),
+    )
+
+    game_session_id: Mapped[int] = mapped_column(
+        ForeignKey("game_sessions.id"), primary_key=True
+    )
+    script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
+    culprit_game_character_id: Mapped[int] = mapped_column(nullable=False)
+    vote_result: Mapped[str] = mapped_column(String(30), nullable=False)
+    accused_game_character_id: Mapped[int | None] = mapped_column(nullable=True)
+    is_tie: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    human_vote_target_id: Mapped[int] = mapped_column(nullable=False)
+    human_identified_culprit: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    case_outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    ending_narrative: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    game_session: Mapped["GameSession"] = relationship(back_populates="resolution")
 
 
 class DirectorRecommendationRecord(Base):
@@ -405,6 +461,7 @@ class Message(Base):
         ForeignKey("game_characters.id"), nullable=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    phase: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -771,6 +828,7 @@ class GameClueDisclosure(Base):
     related_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("messages.id"), nullable=True
     )
+    phase: Mapped[str | None] = mapped_column(String(40), nullable=True)
     client_request_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

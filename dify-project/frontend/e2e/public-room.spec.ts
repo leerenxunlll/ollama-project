@@ -100,6 +100,14 @@ test('shows public turns, partial failures, and one proactive AI step', async ({
     })
   })
 
+  await page.route('**/api/ai/status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ configured: true }),
+    })
+  })
+
   await page.route(`**/api/games/${game.id}/ai-step`, async (route) => {
     await route.fulfill({
       status: 200,

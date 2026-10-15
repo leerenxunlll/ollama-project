@@ -72,6 +72,7 @@ def send_public_turn(
         channel_type="public",
         receiver_game_character_id=None,
         content=payload.content,
+        phase=game.current_phase,
     )
     db.add(human_message)
     db.commit()
@@ -146,6 +147,7 @@ def send_public_turn(
             channel_type="public",
             receiver_game_character_id=None,
             content=reply.speech,
+            phase=phase_at_start,
         )
         try:
             persist_character_reply(
@@ -283,6 +285,7 @@ def run_proactive_speaker_step(
         channel_type="public",
         receiver_game_character_id=None,
         content=reply.speech,
+        phase=action_phase,
     )
     persist_character_reply(
         db,

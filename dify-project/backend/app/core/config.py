@@ -20,6 +20,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DIFY_CHARACTER_API_KEY", "DIFY_API_KEY"),
     )
     dify_director_api_key: str = ""
+    dify_vote_api_key: str = ""
     dify_writer_api_key: str = ""
     dify_script_quality_api_key: str = ""
 
@@ -38,6 +39,11 @@ class Settings(BaseSettings):
     def dify_director_configured(self) -> bool:
         """Whether the Director workflow has its independent Dify API key."""
         return bool(self.dify_api_url.strip() and self.dify_director_api_key.strip())
+
+    @property
+    def dify_vote_configured(self) -> bool:
+        """Whether the independent Character Vote Workflow is configured."""
+        return bool(self.dify_api_url.strip() and self.dify_vote_api_key.strip())
 
     @property
     def dify_writer_configured(self) -> bool:

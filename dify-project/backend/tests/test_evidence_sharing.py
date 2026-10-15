@@ -162,16 +162,9 @@ def test_character_context_excludes_future_clues_and_script_truth(
         select(Clue).where(Clue.script_id == script_id, Clue.act == "act_2")
     )
     future_clue.description = "FUTURE_CLUE_SENTINEL"
-    db_session.add(
-        ScriptCanonicalData(
-            script_id=script_id,
-            case_truth_json={"secret": "SCRIPT_TRUTH_SENTINEL"},
-            timeline_json=[],
-            role_character_ids_json={},
-            clue_ids_json={},
-            clue_event_keys_json={},
-        )
-    )
+    canonical = db_session.get(ScriptCanonicalData, script_id)
+    assert canonical is not None
+    canonical.case_truth_json = {"secret": "SCRIPT_TRUTH_SENTINEL"}
     db_session.commit()
 
     context_json = build_character_context(

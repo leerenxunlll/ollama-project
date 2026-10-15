@@ -137,6 +137,7 @@ def search_for_character(
             .values(
                 game_character_id=character.id,
                 clue_id=clue.id,
+                phase=game.current_phase,
                 source="investigation",
             )
             .on_conflict_do_nothing(
@@ -402,6 +403,7 @@ def share_clue(
         channel_type=payload.visibility,
         receiver_game_character_id=target.id if target is not None else None,
         content=_disclosure_message_content(human, clue, payload.visibility),
+        phase=game.current_phase,
     )
     db.add(message)
     try:
@@ -413,6 +415,7 @@ def share_clue(
             visibility=payload.visibility,
             target_game_character_id=target.id if target is not None else None,
             related_message_id=message.id,
+            phase=game.current_phase,
             client_request_id=request_id,
         )
         db.add(disclosure)
@@ -605,6 +608,7 @@ def record_character_disclosure(
         channel_type=visibility,
         receiver_game_character_id=target.id if target is not None else None,
         content=content,
+        phase=game.current_phase,
     )
     db.add(disclosure_message)
     db.flush()
@@ -615,6 +619,7 @@ def record_character_disclosure(
         visibility=visibility,
         target_game_character_id=target.id if target is not None else None,
         related_message_id=disclosure_message.id,
+        phase=game.current_phase,
     )
     db.add(disclosure)
     db.flush()

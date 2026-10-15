@@ -1,6 +1,6 @@
 # AI Murder Mystery
 
-AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。Phase 0–9 已完成；当前 Phase 10 增加受控搜证、线索知识来源、线索披露与有界 AI 调查。Writer 生成的内容必须经过审核和显式批准，才会创建正式 Script。
+AI Murder Mystery 是一个基于 Web、FastAPI 与 Dify 的多智能体剧本杀项目。Phase 0–10 的主要功能已完成；当前 Phase 11 增加 AI 独立投票、确定性结算、真相揭晓与游戏结束后的 God-View 回放。真实 Vote Dify Smoke 仍需配置独立 Workflow Key 后验收。Writer 生成的内容必须经过审核和显式批准，才会创建正式 Script。
 
 ## Phase 3 已完成
 
@@ -220,11 +220,13 @@ npm run dev
 
 ### 配置与本地通信
 
-将 `.env.example` 复制为项目根目录的 `.env`。后端通过 Pydantic Settings 读取 `APP_NAME`、`APP_ENV`、`DATABASE_URL`、`DIFY_API_URL`、`DIFY_CHARACTER_API_KEY`、`DIFY_DIRECTOR_API_KEY`、`DIFY_WRITER_API_KEY` 和 `DIFY_SCRIPT_QUALITY_API_KEY`。Character Chatflow、Director、Writer 与 Script Quality Workflow 使用独立 Dify App Key；各 Key 不互相回退。当前设置兼容读取旧名 `DIFY_API_KEY` 作为 Character Key；新配置请统一使用 `DIFY_CHARACTER_API_KEY`。迁移旧 `.env` 时，将旧变量改名并删除旧名，避免配置重复。真实密钥只放在本地 `.env`，不要写入代码、文档或 `.env.example`；真实 `.env` 已在 `.gitignore` 中排除。
+将 `.env.example` 复制为项目根目录的 `.env`。后端通过 Pydantic Settings 读取 `APP_NAME`、`APP_ENV`、`DATABASE_URL`、`DIFY_API_URL`、`DIFY_CHARACTER_API_KEY`、`DIFY_DIRECTOR_API_KEY`、`DIFY_VOTE_API_KEY`、`DIFY_WRITER_API_KEY` 和 `DIFY_SCRIPT_QUALITY_API_KEY`。Character Chatflow、Director、Character Vote、Writer 与 Script Quality Workflow 使用独立 Dify App Key；各 Key 不互相回退。当前设置兼容读取旧名 `DIFY_API_KEY` 作为 Character Key；新配置请统一使用 `DIFY_CHARACTER_API_KEY`。迁移旧 `.env` 时，将旧变量改名并删除旧名，避免配置重复。真实密钥只放在本地 `.env`，不要写入代码、文档或 `.env.example`；真实 `.env` 已在 `.gitignore` 中排除。
 
 Writer Workflow 的完整节点、Schema、Prompts、配置和 smoke 教程见 [Dify Writer Workflow 配置](docs/dify-writer-workflow.md)。在 Writer App 发布并配置独立 Key 前，页面会显示 Writer 未配置；Mock 测试通过不代表真实 Dify Workflow 已验证。
 
 Script Quality Workflow 使用独立 `DIFY_SCRIPT_QUALITY_API_KEY`；Dify 节点、Schema 与调用步骤见 [Quality Workflow 配置](docs/dify-script-quality-workflow.md)。
+
+Character Vote Workflow 使用独立 `DIFY_VOTE_API_KEY`。AI 每次由 Runtime Tick 单独投票，不能复用 Character Chatflow 的 Key；本地与 Dify 配置教程见 [Character Vote Workflow](docs/dify-character-vote-workflow.md)。投票、确定性结算与安全进度 API 说明见[投票与结局](docs/voting-and-ending.md)。Ending 与 God-View Replay 当前仅在 Development 环境开放，见[回放权限与事件来源](docs/god-view-replay.md)。
 
 ### Real Dify smoke test
 
@@ -273,6 +275,7 @@ Writer 真实 smoke 仅使用 Development Writer Draft Debug 页面逐步运行�
 | GET | `/api/games/{game_id}/characters/{game_character_id}/thoughts` | Development 专用 Thought、emotion 与 Memory 调试 |
 | GET | `/api/games/{game_id}/public-messages` | 读取公共频道记录，不返回私聊 |
 | GET | `/api/ai/status` | 检查 Character Dify 配置是否可用，不返回密钥 |
+| GET | `/api/ai/vote/status` | 检查独立 Character Vote Workflow 是否配置，不返回密钥 |
 | GET | `/api/director/status` | Development only：检查独立 Director Workflow 是否配置，不返回密钥 |
 | GET | `/api/writer/status` | Development only：检查独立 Writer Workflow 是否配置，不返回密钥 |
 | POST | `/api/writer/drafts` | Development only：创建未发布的 ScriptDraft |
@@ -285,7 +288,10 @@ Writer 真实 smoke 仅使用 Development Writer Draft Debug 页面逐步运行�
 | POST | `/api/games/{game_id}/start` | 校验角色分配并开始游戏 |
 | POST | `/api/games/{game_id}/advance-phase` | 按固定顺序推进一个剧情阶段 |
 | POST | `/api/games/{game_id}/votes` | Development only：模拟提交一张正式选票（V0.1 不支持改票） |
+| GET | `/api/games/{game_id}/vote/status` | 安全投票进度；不显示投票目标或理由 |
 | GET | `/api/games/{game_id}/votes/result` | Development 调试用确定性计票结果 |
+| GET | `/api/games/{game_id}/ending` | Development only：有效结算后的真相与四张选票 |
+| GET | `/api/games/{game_id}/replay` | Development only：有效结算后的上帝视角事件时间线 |
 | POST | `/api/games/{game_id}/director/analyze` | Development only：基于隔离后的 DirectorContext 分析并保存建议 |
 | POST | `/api/games/{game_id}/director/recommendations/{recommendation_id}/apply` | Development only：验证并申请执行、拒绝或标记为 advisory |
 | GET | `/api/games/{game_id}/investigation/locations` | 读取当前调查阶段的线索地点 |

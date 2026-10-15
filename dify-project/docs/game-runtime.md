@@ -88,6 +88,14 @@ alembic -c backend/alembic.ini current
 
 Runtime 将已知 Dify 错误转换为安全 reason code，例如 `director_timeout`、`director_not_configured`、`character_timeout`、`character_output_invalid`。错误响应和日志不包含 API Key、原始模型错误正文、DirectorContext、CharacterContext、inner_os、私人消息或 Script Truth。对某个事件的失败不会无限重试；页面可显示状态并由玩家继续公开交流、搜证、Ready 或手动暂停。
 
+## Phase 11 AI 投票
+
+在 `vote` 阶段 Runtime 不安排 Director 分析、搜证或公开发言，而按 `GameCharacter.id` 顺序选出一名未投票 AI，执行一项独立 Vote Workflow 动作。每个 Tick 最多生成一张选票；Human 只能通过 Human Vote API 投票。Vote Workflow 失败不会伪造目标，重试最多三次、间隔至少 30 秒。
+
+投票 Context 使用同一 `CharacterContextBuilder`，并增加三名公开候选人；不传真实案件真相、DirectorContext 或他人选票。选票通过后复用 `Vote` 表和每局每角色唯一约束。Runtime 只有在 Human 与三个 AI 都已提交合法选票后才允许 `vote → ending`。此转移与 GameResolution 和 system ending 消息在同一事务中保存。
+
+进入 ending 后 GameSession 为 `finished`，后续 Runtime Tick 返回 `game_finished`，不再调度 AI 或 Director。Vote Workflow 配置见 [Dify Character Vote Workflow](dify-character-vote-workflow.md)，结算规则见 [投票与结局](voting-and-ending.md)。
+
 ## 浏览器关闭与权限
 
 V0.1 没有 Celery、Redis、APScheduler、WebSocket、SSE 或常驻后台 worker。页面关闭时客户端 Tick 停止，Runtime 不保证继续自主运行；游戏阶段计时仍按数据库中的服务端 `phase_started_at` 计算，页面重新打开不会重置时间。重新打开 Development 页面会重新读取服务器状态。

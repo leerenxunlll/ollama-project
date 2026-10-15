@@ -121,15 +121,22 @@ def _cast_complete_vote_set(
     targets = target_indices or tuple(
         (index + 1) % len(characters) for index in range(4)
     )
-    for voter_index, target_index in enumerate(targets):
-        create_vote(
-            db_session,
-            game_id,
-            VoteCreate(
-                voter_game_character_id=characters[voter_index].id,
-                target_game_character_id=characters[target_index].id,
-            ),
+    db_session.add_all(
+        Vote(
+            game_session_id=game_id,
+            voter_game_character_id=characters[index].id,
+            target_game_character_id=characters[targets[index]].id,
         )
+        for index in range(1, len(characters))
+    )
+    create_vote(
+        db_session,
+        game_id,
+        VoteCreate(
+            voter_game_character_id=characters[0].id,
+            target_game_character_id=characters[targets[0]].id,
+        ),
+    )
 
 
 def _recommendation(action: DirectorAction, **references) -> DirectorRecommendation:

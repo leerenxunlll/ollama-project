@@ -23,6 +23,12 @@ from app.agents.director_workflow_client import (
     DirectorWorkflowError,
     DirectorWorkflowTimeoutError,
 )
+from app.agents.vote_agent import CharacterVoteAgent, VoteDecisionValidationError
+from app.agents.vote_workflow_client import (
+    VoteWorkflowConfigurationError,
+    VoteWorkflowError,
+    VoteWorkflowTimeoutError,
+)
 from app.game.flow_manager import can_public_speak
 from app.game.runtime_policy import (
     DISCUSSION_PHASES,
@@ -42,6 +48,7 @@ from app.models import (
     GameRuntimeState,
     GameSession,
     Message,
+    Vote,
 )
 from app.schemas.director import DirectorAction
 from app.schemas.runtime import (
@@ -61,7 +68,12 @@ from app.services.evidence import (
     next_ai_investigation_location,
     search_for_ai,
 )
-from app.services.game_flow import get_game_flow_state
+from app.services.game_flow import (
+    InvalidAIVoteTarget,
+    VoteConflict,
+    get_game_flow_state,
+    run_ai_vote,
+)
 from app.services.gameplay import advance_game_phase
 from app.services.runtime_guards import (
     RuntimeClaimLost,
@@ -283,6 +295,7 @@ def run_runtime_tick(
     game_id: int,
     director_agent: DirectorAgent,
     character_agent: CharacterAgent,
+    vote_agent: CharacterVoteAgent | None = None,
     *,
     now: datetime | None = None,
     policy: RuntimePolicy = RUNTIME_POLICY,
@@ -490,13 +503,57 @@ def run_runtime_tick(
 
     if game.current_phase == "vote":
         if not flow.vote_progress.voting_complete:
+            next_vote = _next_ai_vote(db, game, current_time, policy)
+            if next_vote is not None:
+                voter, attempt, event_key, wait_reason = next_vote
+                if wait_reason is not None:
+                    return _finish_tick(
+                        db,
+                        game_id,
+                        token,
+                        phase_before,
+                        current_time,
+                        reason_code=wait_reason,
+                        execution_status="idle",
+                        policy=policy,
+                    )
+                return _run_ai_vote(
+                    db,
+                    game,
+                    voter,
+                    attempt,
+                    event_key,
+                    token,
+                    phase_before,
+                    current_time,
+                    vote_agent,
+                    policy,
+                )
+            human_voter_id = db.scalar(
+                select(GameCharacter.id).where(
+                    GameCharacter.game_session_id == game.id,
+                    GameCharacter.controller_type == "human",
+                )
+            )
+            human_has_voted = (
+                human_voter_id is not None
+                and db.scalar(
+                    select(Vote.id).where(
+                        Vote.game_session_id == game.id,
+                        Vote.voter_game_character_id == human_voter_id,
+                    )
+                )
+                is not None
+            )
             return _finish_tick(
                 db,
                 game_id,
                 token,
                 phase_before,
                 current_time,
-                reason_code="vote_incomplete",
+                reason_code=(
+                    "vote_incomplete" if human_has_voted else "human_vote_pending"
+                ),
                 execution_status="idle",
                 policy=policy,
             )
@@ -705,6 +762,168 @@ def run_runtime_tick(
             policy=policy,
             action_log=failed_log,
         )
+
+
+def _next_ai_vote(
+    db: Session,
+    game: GameSession,
+    now: datetime,
+    policy: RuntimePolicy,
+) -> tuple[GameCharacter, int, str, str | None] | None:
+    """Select the first unvoted AI and enforce bounded retry spacing."""
+    voter = db.scalar(
+        select(GameCharacter)
+        .where(
+            GameCharacter.game_session_id == game.id,
+            GameCharacter.controller_type == "ai",
+            ~GameCharacter.id.in_(
+                select(Vote.voter_game_character_id).where(
+                    Vote.game_session_id == game.id
+                )
+            ),
+        )
+        .order_by(GameCharacter.id)
+        .limit(1)
+    )
+    if voter is None:
+        return None
+
+    prefix = f"ai-vote:{_time_key(game.phase_started_at)}:{voter.id}:attempt:"
+    attempts = [
+        action
+        for action in db.scalars(
+            select(GameRuntimeActionLog)
+            .where(
+                GameRuntimeActionLog.game_session_id == game.id,
+                GameRuntimeActionLog.event_type == "ai_vote",
+            )
+            .order_by(GameRuntimeActionLog.id)
+        ).all()
+        if action.event_key.startswith(prefix)
+    ]
+    if len(attempts) >= policy.ai_vote_max_attempts:
+        return voter, len(attempts), "", "ai_vote_retry_limit"
+
+    if attempts:
+        last_attempt = attempts[-1]
+        if last_attempt.execution_status == "processing":
+            return voter, len(attempts), "", "ai_vote_in_progress"
+        last_attempt_at = _utc(last_attempt.completed_at or last_attempt.started_at)
+        retry_after = last_attempt_at + timedelta(seconds=policy.ai_vote_retry_seconds)
+        if retry_after > now:
+            return voter, len(attempts), "", "ai_vote_retry_wait"
+
+    attempt = len(attempts) + 1
+    return voter, attempt, f"{prefix}{attempt}", None
+
+
+def _run_ai_vote(
+    db: Session,
+    game: GameSession,
+    voter: GameCharacter,
+    attempt: int,
+    event_key: str,
+    token: str,
+    phase_before: str,
+    now: datetime,
+    vote_agent: CharacterVoteAgent | None,
+    policy: RuntimePolicy,
+) -> RuntimeStepResult:
+    """Run at most one AI workflow and persist its validated vote atomically."""
+    action_log = _new_action_log(
+        db,
+        game.id,
+        token,
+        event_key,
+        "ai_vote",
+        "ai_vote",
+        now,
+    )
+    if action_log is None:
+        return _finish_tick(
+            db,
+            game.id,
+            token,
+            phase_before,
+            now,
+            reason_code="ai_vote_attempt_exists",
+            execution_status="idle",
+            policy=policy,
+        )
+    action_log.reason_code = f"attempt_{attempt}"
+    db.commit()
+
+    try:
+        if vote_agent is None or not vote_agent.configured:
+            raise VoteWorkflowConfigurationError("Vote Workflow is not configured")
+        vote = run_ai_vote(
+            db,
+            game.id,
+            voter.id,
+            vote_agent,
+            expected_phase=phase_before,
+            expected_phase_started_at=game.phase_started_at,
+            runtime_claim_token=token,
+            now=now,
+            commit=False,
+        )
+        action_log = db.get(GameRuntimeActionLog, action_log.id)
+        action_log.execution_status = "completed"
+        action_log.reason_code = "ai_vote_cast"
+        action_log.completed_at = now
+        return _finish_tick(
+            db,
+            game.id,
+            token,
+            phase_before,
+            now,
+            reason_code="ai_vote_cast",
+            execution_status="completed",
+            action_type="ai_vote",
+            vote_id=vote.id,
+            policy=policy,
+            action_log=action_log,
+        )
+    except Exception as error:
+        db.rollback()
+        failed_log = db.scalar(
+            select(GameRuntimeActionLog).where(
+                GameRuntimeActionLog.game_session_id == game.id,
+                GameRuntimeActionLog.event_key == event_key,
+                GameRuntimeActionLog.claim_token == token,
+            )
+        )
+        return _finish_tick(
+            db,
+            game.id,
+            token,
+            phase_before,
+            now,
+            reason_code=_safe_vote_error_code(error),
+            execution_status="failed",
+            action_type="ai_vote",
+            policy=policy,
+            action_log=failed_log,
+        )
+
+
+def _safe_vote_error_code(error: Exception) -> str:
+    """Return bounded public status codes without exposing model or context data."""
+    if isinstance(error, VoteWorkflowConfigurationError):
+        return "vote_workflow_not_configured"
+    if isinstance(error, VoteWorkflowTimeoutError):
+        return "vote_workflow_timeout"
+    if isinstance(error, VoteDecisionValidationError):
+        return "vote_invalid_output"
+    if isinstance(error, InvalidAIVoteTarget):
+        return "vote_invalid_candidate"
+    if isinstance(error, VoteConflict):
+        return "ai_vote_conflict"
+    if isinstance(error, (RuntimeClaimLost, StaleRuntimeAction)):
+        return "stale_phase"
+    if isinstance(error, VoteWorkflowError):
+        return "vote_workflow_failed"
+    return "ai_vote_failed"
 
 
 def _run_ai_investigation(
@@ -1248,6 +1467,7 @@ def _finish_tick(
     policy: RuntimePolicy,
     action_type: str = "none",
     public_message_id: int | None = None,
+    vote_id: int | None = None,
     recommendation_id: int | None = None,
     action_log: GameRuntimeActionLog | None = None,
     next_check_after_seconds: int | None = None,
@@ -1303,6 +1523,7 @@ def _finish_tick(
         phase_before=phase_before,
         phase_after=game.current_phase,
         public_message_id=public_message_id,
+        vote_id=vote_id,
         recommendation_id=recommendation_id,
         reason_code=reason_code,
         next_check_after_seconds=(

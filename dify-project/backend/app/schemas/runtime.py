@@ -11,6 +11,7 @@ RuntimeActionType = Literal[
     "director_analysis",
     "proactive_speech",
     "ai_investigation",
+    "ai_vote",
     "phase_advance",
     "advisory",
 ]
@@ -62,6 +63,7 @@ class RuntimeStepResult(BaseModel):
     phase_before: str
     phase_after: str
     public_message_id: int | None = None
+    vote_id: int | None = None
     recommendation_id: int | None = None
     reason_code: str
     next_check_after_seconds: int

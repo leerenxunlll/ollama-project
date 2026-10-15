@@ -77,6 +77,7 @@ def start_game(db: Session, game_id: int) -> GameStateRead:
             channel_type="system",
             receiver_game_character_id=None,
             content="游戏开始。",
+            phase="intro",
         )
     )
     db.commit()
@@ -118,6 +119,11 @@ def advance_game_phase(
             expected_phase_started_at=expected_phase_started_at,
             now=transition_time,
         )
+    if target_phase == "ending":
+        from app.services.resolution import finalize_game_resolution
+
+        finalize_game_resolution(db, game, transition_time)
+
     game.current_phase = target_phase
     game.phase_started_at = transition_time
     content = PHASE_MESSAGES[target_phase]
@@ -132,6 +138,7 @@ def advance_game_phase(
             channel_type="system",
             receiver_game_character_id=None,
             content=content,
+            phase=target_phase,
         )
     )
     if commit:
@@ -177,9 +184,13 @@ def create_player_message(
 ) -> Message:
     """Persist a public/private message from participants in the same game."""
     game = _get_game(db, game_id)
+    if game.status != "in_progress":
+        raise GameRuleError("Messages are only accepted during an active game")
     sender = db.get(GameCharacter, payload.sender_game_character_id)
     if sender is None or sender.game_session_id != game.id:
         raise LookupError("Sender not found in this game")
+    if sender.controller_type != "human":
+        raise GameRuleError("Player messages must be sent by the Human character")
 
     receiver = None
     if payload.channel_type == "public" and not can_public_speak(
@@ -199,6 +210,7 @@ def create_player_message(
         channel_type=payload.channel_type,
         receiver_game_character_id=receiver.id if receiver is not None else None,
         content=payload.content,
+        phase=game.current_phase,
     )
     db.add(message)
     db.commit()

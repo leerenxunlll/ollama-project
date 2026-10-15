@@ -19,3 +19,5 @@
 - [x] Phase 9：自主 Runtime 编排、阶段阅读确认、受控 AI 发言与真实 Dify smoke
 - [x] Phase 10：搜证、线索知识隔离、正式分享披露与 Runtime 联动（本地实现与回归完成）
 - [ ] Phase 10 Finalization：发布更新后的 Character Dify Schema，并完成真实 AI 披露 smoke test
+- [x] Phase 11：AI 投票、确定性结算、真相揭晓、God-View Replay 与本地回归
+- [x] Phase 11 Finalization：配置独立 Character Vote Workflow 并完成真实 Dify smoke test

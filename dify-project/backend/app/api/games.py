@@ -40,6 +40,7 @@ from app.schemas.ai import (
     PublicTurnResponse,
 )
 from app.schemas.context import CharacterContext
+from app.schemas.ending import GameEndingRead, GameReplayRead
 from app.schemas.evidence import (
     ClueDisclosureRead,
     ClueHistoryEventRead,
@@ -62,6 +63,7 @@ from app.schemas.game import (
     SelectableCharacterRead,
 )
 from app.schemas.story import IntroAcknowledgementRead, ScriptChapterRead
+from app.schemas.voting import GameVoteStatus
 from app.services.character_chat import send_character_message
 from app.services.character_context import build_character_context
 from app.services.evidence import (
@@ -70,7 +72,13 @@ from app.services.evidence import (
     get_public_clues,
     share_clue,
 )
-from app.services.game_flow import create_vote, get_game_flow_state, get_vote_result
+from app.services.game_flow import (
+    create_vote,
+    get_game_flow_state,
+    get_game_vote_status,
+    get_vote_result,
+)
+from app.services.game_replay import get_game_replay
 from app.services.gameplay import (
     advance_game_phase,
     create_player_message,
@@ -80,6 +88,7 @@ from app.services.gameplay import (
     start_game,
 )
 from app.services.public_turn import run_proactive_step, send_public_turn
+from app.services.resolution import get_game_ending
 from app.services.script_chapters import (
     acknowledge_human_intro,
     get_human_chapters,
@@ -297,10 +306,45 @@ def cast_game_vote(
     payload: VoteCreate,
     db: Session = Depends(get_db),
 ) -> VoteRead:
-    """Record one development vote after deterministic membership checks."""
+    """Record the Human's immutable vote after deterministic membership checks."""
     _require_development()
     try:
         return create_vote(db, game_id, payload)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/vote/status", response_model=GameVoteStatus)
+def read_game_vote_status(
+    game_id: int, db: Session = Depends(get_db)
+) -> GameVoteStatus:
+    """Return safe completion flags without exposing any vote target."""
+    try:
+        return get_game_vote_status(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/ending", response_model=GameEndingRead)
+def read_game_ending(game_id: int, db: Session = Depends(get_db)) -> GameEndingRead:
+    """Development-only post-game reveal of the official canonical truth."""
+    _require_development()
+    try:
+        return get_game_ending(db, game_id)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except GameRuleError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.get("/games/{game_id}/replay", response_model=GameReplayRead)
+def read_game_replay(game_id: int, db: Session = Depends(get_db)) -> GameReplayRead:
+    """Development-only God-View projection after a valid game resolution."""
+    _require_development()
+    try:
+        return get_game_replay(db, game_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except GameRuleError as error:

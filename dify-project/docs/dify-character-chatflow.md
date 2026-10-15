@@ -2,6 +2,8 @@
 
 Phase 5 将 Character Chatflow 的输出从单独台词升级为结构化 JSON。Phase 6 继续使用同一个 Character Chatflow；后端通过 `character_context` 和 `interaction_context` 提供角色可见信息及交互模式。Phase 10 为输出增加可选 `clue_disclosure_intent`，请求后端正式披露当前角色已经知道的线索；Dify 仍不拥有游戏事实或权限。
 
+Phase 11 的最终投票不修改或复用本 Chatflow。AI 投票通过单独的 `AI Murder Mystery - Character Vote` Dify Workflow 和 `DIFY_VOTE_API_KEY` 执行；Character Chatflow 继续负责私聊、公开回复、主动发言与 Phase 10 线索披露。投票 Workflow 的 Context 同样由后端权限过滤，节点与输出契约见 [Character Vote Workflow 配置](dify-character-vote-workflow.md)。
+
 ## 更新现有 Chatflow
 
 1. 打开当前已发布的 Character Chatflow，编辑原 LLM 节点，保留现有 **Structured Output** 和下方 JSON Schema。

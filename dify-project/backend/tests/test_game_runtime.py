@@ -572,8 +572,16 @@ def test_vote_never_autocompletes_and_only_advances_after_four_votes(
     character_agent = StubCharacter()
 
     waiting = run_runtime_tick(db_session, game.id, director, character_agent, now=now)
-    assert waiting.reason_code == "vote_incomplete"
+    assert waiting.reason_code == "vote_workflow_not_configured"
     assert game.current_phase == "vote"
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Vote)
+            .where(Vote.game_session_id == game.id)
+        )
+        == 0
+    )
 
     db_session.add_all(
         [

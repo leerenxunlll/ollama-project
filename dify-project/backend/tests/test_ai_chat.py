@@ -22,6 +22,7 @@ from app.models import (
     GameCharacterClue,
     GameSession,
     Message,
+    Vote,
 )
 from app.schemas.ai import CharacterEmotion, CharacterIntent, MemoryUpdate
 from app.schemas.context import CharacterContext
@@ -118,16 +119,25 @@ def _advance_one_phase(client, db_session: Session, game: dict):
             .order_by(GameCharacter.id)
         ).all()
         for index, character in enumerate(characters):
+            target = characters[(index + 1) % len(characters)]
+            if character.controller_type == "ai":
+                db_session.add(
+                    Vote(
+                        game_session_id=game["id"],
+                        voter_game_character_id=character.id,
+                        target_game_character_id=target.id,
+                    )
+                )
+                continue
             vote_response = client.post(
                 f"/api/games/{game['id']}/votes",
                 json={
                     "voter_game_character_id": character.id,
-                    "target_game_character_id": characters[
-                        (index + 1) % len(characters)
-                    ].id,
+                    "target_game_character_id": target.id,
                 },
             )
             assert vote_response.status_code == 201
+        db_session.commit()
     return client.post(f"/api/games/{game['id']}/advance-phase")
 
 

@@ -377,3 +377,28 @@ flowchart LR
 - Director 使用与角色 Context 独立的 `DirectorContext` builder/schema；它只读取当前 Script 权威字段与公开/客观游戏状态，不能访问 CharacterThought、CharacterMemory 或 private Message。当前没有完整案件真相字段；Context schema 也不虚构完整真相。
 
 `/api/games/{game_id}/me/character` 当前以本局唯一的 `human` GameCharacter 识别玩家。登录认证尚未实现，因此 GameSession ID 不是用户身份凭据。
+
+## Phase 11 Vote, Resolution & Replay
+
+AI 投票使用独立 `CharacterVoteAgent` 和 Dify Character Vote Workflow，不修改 Character Chatflow。Agent 只能接收由 `CharacterContextBuilder` 构造的当前角色授权信息及三名公开候选人；它不接收其他选票或 DirectorContext。`DIFY_VOTE_API_KEY` 独立配置，不回退 Character、Director、Writer 或 Quality Key。AI 输出经 Pydantic 与候选人白名单校验后，沿用同一 `Vote` 表保存。
+
+```mermaid
+flowchart LR
+    Runtime[Runtime Tick] --> Claim[SQLite Atomic Claim]
+    Claim --> Context[CharacterContextBuilder]
+    Context --> VoteAgent[CharacterVoteAgent]
+    VoteAgent --> Dify[Character Vote Workflow]
+    Dify --> Validate[Schema + Candidate Validator]
+    Validate --> VoteTable[(Vote)]
+    VoteTable --> Resolver[Deterministic Resolution]
+    Truth[(Published ScriptCanonicalData)] --> Resolver
+    Resolver --> Result[(GameResolution)]
+    Result --> Ending[Development Ending API]
+    Result --> Replay[Development God-View Replay]
+```
+
+只有四名合法角色都投票后才能进入 `ending`。Resolution 在一个数据库事务中绑定 `GameSession`，从发布剧本的 Canonical Truth 读取唯一凶手并核对 Script 中唯一 `is_killer` 角色；AI 输出与发言不影响客观结算。现有 tally 规则在最高票并列时返回 tie，不随机选人。`GameResolution` 的 `game_session_id` 主键保证每局最多一份结果。
+
+Replay 只组合已持久化的 Message、CharacterThought、CharacterMemory、搜证、正式线索披露、Vote 和 Resolution。Thought 通过 `ai_message_id` 对应具体发言；Memory 使用真实创建时间并标记为主观记录。回放不读取模型隐藏推理，也不会将结果送回 Character/Director Context。
+
+由于当前没有登录认证，`/ending` 与完整 `/replay` 仅在 `APP_ENV=development` 暴露。公网部署前必须建立身份验证和 GameSession 访问授权。完整规则见 [投票与结局](voting-and-ending.md)、[God-View Replay](god-view-replay.md) 和 [Character Vote Workflow 配置](dify-character-vote-workflow.md)。

@@ -7,6 +7,10 @@ export interface AiStatusResponse {
   configured: boolean
 }
 
+export interface VoteWorkflowStatusResponse {
+  configured: boolean
+}
+
 export interface MessageRead {
   id: number
   game_session_id: number
@@ -210,12 +214,14 @@ export interface RuntimeStepResult {
     | 'director_analysis'
     | 'proactive_speech'
     | 'ai_investigation'
+    | 'ai_vote'
     | 'phase_advance'
     | 'advisory'
   execution_status: 'idle' | 'completed' | 'failed' | 'conflict'
   phase_before: GamePhase
   phase_after: GamePhase
   public_message_id: number | null
+  vote_id: number | null
   recommendation_id: number | null
   reason_code: string
   next_check_after_seconds: number
@@ -257,6 +263,105 @@ export interface VoteResult {
   total_voters: number
   voting_complete: boolean
   submitted_voter_game_character_ids: number[]
+}
+
+export interface GameVoteStatus {
+  game_id: number
+  current_phase: GamePhase
+  votes_cast: number
+  total_voters: number
+  human_has_voted: boolean
+  ai_characters: {
+    game_character_id: number
+    character_name: string
+    has_voted: boolean
+  }[]
+  voting_complete: boolean
+}
+
+export interface GameEnding {
+  game_id: number
+  script_id: number
+  culprit_game_character_id: number
+  culprit_name: string
+  vote_result: 'culprit_identified' | 'wrong_accusation' | 'tie'
+  accused_game_character_id: number | null
+  is_tie: boolean
+  human_vote_target_id: number
+  human_identified_culprit: boolean
+  case_outcome: 'culprit_identified' | 'wrong_accusation' | 'tie'
+  ending_narrative: string
+  resolved_at: string
+  truth: {
+    culprit_role_key: string
+    victim: string
+    motive: string
+    method: string
+    crime_time: string
+    crime_location: string
+    case_summary: string
+    key_causal_facts: string[]
+  }
+  canonical_timeline: {
+    event_key: string
+    time: string
+    location: string
+    description: string
+    involved_role_keys: string[]
+    is_public_knowledge: boolean
+  }[]
+  key_clues: {
+    clue_id: number
+    name: string
+    description: string
+    act: string
+    location: string
+  }[]
+  votes: {
+    vote_id: number
+    voter_game_character_id: number
+    voter_name: string
+    target_game_character_id: number
+    target_name: string
+    reason: string | null
+    created_at: string
+  }[]
+}
+
+export interface GameReplayEvent {
+  event_id: string
+  event_type:
+    | 'game_started'
+    | 'message'
+    | 'character_thought'
+    | 'character_memory'
+    | 'clue_acquired'
+    | 'clue_disclosure'
+    | 'vote'
+    | 'game_ended'
+  timestamp: string
+  phase: GamePhase | null
+  actor_game_character_id: number | null
+  actor_name: string | null
+  target_game_character_id: number | null
+  target_name: string | null
+  visibility: 'public' | 'private' | 'god'
+  content: string | null
+  inner_os: string | null
+  emotion: string | null
+  intent: string | null
+  memory_importance: number | null
+  subjective: boolean
+  related_message_id: number | null
+  related_clue_id: number | null
+  related_vote_id: number | null
+}
+
+export interface GameReplay {
+  game_id: number
+  started_at: string | null
+  ended_at: string
+  events: GameReplayEvent[]
 }
 
 export interface DirectorStatusResponse {
@@ -692,6 +797,12 @@ export function getAiStatus(signal?: AbortSignal): Promise<AiStatusResponse> {
   return requestJson('/api/ai/status', { signal })
 }
 
+export function getVoteWorkflowStatus(
+  signal?: AbortSignal,
+): Promise<VoteWorkflowStatusResponse> {
+  return requestJson('/api/ai/vote/status', { signal })
+}
+
 export function sendAiChat(
   gameId: number,
   targetGameCharacterId: number,
@@ -801,6 +912,18 @@ export function submitGameVote(
 
 export function getGameVoteResult(gameId: number): Promise<VoteResult> {
   return requestJson(`/api/games/${gameId}/votes/result`)
+}
+
+export function getGameVoteStatus(gameId: number): Promise<GameVoteStatus> {
+  return requestJson(`/api/games/${gameId}/vote/status`)
+}
+
+export function getGameEnding(gameId: number): Promise<GameEnding> {
+  return requestJson(`/api/games/${gameId}/ending`)
+}
+
+export function getGameReplay(gameId: number): Promise<GameReplay> {
+  return requestJson(`/api/games/${gameId}/replay`)
 }
 
 export function getDirectorStatus(

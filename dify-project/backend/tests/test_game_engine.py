@@ -13,6 +13,7 @@ from app.models import (
     GameSession,
     Message,
     Script,
+    Vote,
 )
 from app.services.seed import seed_development_data
 
@@ -64,16 +65,25 @@ def _advance_one_phase(client, db_session: Session, game_id: int):
             .order_by(GameCharacter.id)
         ).all()
         for index, character in enumerate(characters):
+            target = characters[(index + 1) % len(characters)]
+            if character.controller_type == "ai":
+                db_session.add(
+                    Vote(
+                        game_session_id=game_id,
+                        voter_game_character_id=character.id,
+                        target_game_character_id=target.id,
+                    )
+                )
+                continue
             vote = client.post(
                 f"/api/games/{game_id}/votes",
                 json={
                     "voter_game_character_id": character.id,
-                    "target_game_character_id": characters[
-                        (index + 1) % len(characters)
-                    ].id,
+                    "target_game_character_id": target.id,
                 },
             )
             assert vote.status_code == 201
+        db_session.commit()
     return client.post(f"/api/games/{game_id}/advance-phase")
 
 

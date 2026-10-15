@@ -6,7 +6,7 @@ const game = {
   id: gameId,
   script_id: 12,
   status: 'in_progress',
-  current_phase: 'vote',
+  current_phase: 'discussion_1',
   created_at: '2026-10-06T08:00:00Z',
   started_at: '2026-10-06T08:00:00Z',
   ended_at: null,
@@ -106,10 +106,10 @@ test('shows the Phase 7 game flow and Director debug without private context', a
       await fulfillJson(route, {
         game_id: gameId,
         status: 'in_progress',
-        current_phase: 'vote',
+        current_phase: 'discussion_1',
         started_at: game.started_at,
         ended_at: null,
-        next_phase: 'ending',
+        next_phase: 'act_2',
         can_investigate: false,
       })
       return
@@ -126,16 +126,16 @@ test('shows the Phase 7 game flow and Director debug without private context', a
       await fulfillJson(route, {
         game_id: gameId,
         status: 'in_progress',
-        current_phase: 'vote',
+        current_phase: 'discussion_1',
         phase_started_at: '2026-10-06T08:00:00Z',
         elapsed_seconds: 90,
         minimum_duration_seconds: 120,
         remaining_seconds: 30,
         minimum_time_satisfied: false,
         can_investigate: false,
-        can_discuss: false,
-        can_public_speak: false,
-        can_vote: true,
+        can_discuss: true,
+        can_public_speak: true,
+        can_vote: false,
         can_advance: false,
         is_finished: false,
         vote_progress: {
@@ -158,6 +158,28 @@ test('shows the Phase 7 game flow and Director debug without private context', a
         voting_complete: false,
         submitted_voter_game_character_ids:
           submittedVoterId === null ? [] : [submittedVoterId],
+      })
+      return
+    }
+    if (pathname === '/api/ai/vote/status' && method === 'GET') {
+      await fulfillJson(route, { configured: true })
+      return
+    }
+    if (pathname === `/api/games/${gameId}/vote/status` && method === 'GET') {
+      await fulfillJson(route, {
+        game_id: gameId,
+        current_phase: 'discussion_1',
+        votes_cast: 0,
+        total_voters: 4,
+        human_has_voted: false,
+        ai_characters: game.game_characters
+          .filter((character) => character.controller_type === 'ai')
+          .map((character) => ({
+            game_character_id: character.id,
+            character_name: character.character.name,
+            has_voted: false,
+          })),
+        voting_complete: false,
       })
       return
     }
@@ -254,33 +276,26 @@ test('shows the Phase 7 game flow and Director debug without private context', a
   await expect(page.locator('#game-session-select option').nth(1)).toHaveText(
     '#77 · 进行中 · 剧本 #12',
   )
-  await expect(page.locator('.session-meta')).toContainText('阶段 投票')
+  await expect(page.locator('.session-meta')).toContainText('阶段 第一幕讨论')
   await expect(page.locator('.session-meta')).toContainText('状态 进行中')
-  await expect(page.locator('.session-meta')).toContainText('下一阶段 结局')
+  await expect(page.locator('.session-meta')).toContainText('下一阶段 第二幕')
   await expect(page.locator('.game-action-row')).toContainText(
-    '当前阶段：投票 · 下一阶段：结局',
+    '当前阶段：第一幕讨论 · 下一阶段：第二幕',
   )
-  await expect(page.locator('.flow-summary-grid')).toContainText('投票')
+  await expect(page.locator('.flow-summary-grid')).toContainText('第一幕讨论')
   await expect(page.locator('.flow-summary-grid').nth(0)).toContainText(
     /1:3[0-9]/,
   )
   await expect(page.locator('.flow-summary-grid')).toContainText(
     /0:2[0-9]|0:30/,
   )
-  await expect(page.getByText('公开发言 · 不可用')).toBeVisible()
-  await expect(page.getByText('投票 · 允许')).toBeVisible()
-  await expect(
-    page.getByRole('heading', { name: '投票提交流程' }),
-  ).toBeVisible()
-  await expect(page.locator('.vote-progress-line')).toContainText('0 / 4 票')
-
-  await page.locator('#debug-voter-select').selectOption('42')
-  await page.locator('#debug-target-select').selectOption('43')
-  await page.getByRole('button', { name: '提交测试投票' }).click()
-  await expect(page.getByText('测试投票已提交。')).toBeVisible()
-  await expect(
-    page.locator('.vote-tally-row').filter({ hasText: '陈默 · #43' }),
-  ).toContainText('1 票')
+  await expect(page.getByText('公开发言 · 允许')).toBeVisible()
+  await expect(page.getByText('投票 · 不可用')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '最终投票' })).toBeVisible()
+  await expect(page.locator('.vote-progress-line').first()).toContainText(
+    '0 / 4 票',
+  )
+  await expect(page.locator('#human-vote-target')).toBeDisabled()
 
   await expect(page.getByText('Director 已配置')).toBeVisible()
   await page.getByRole('button', { name: /Analyze Situation/ }).click()

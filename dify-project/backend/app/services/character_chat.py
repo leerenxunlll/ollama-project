@@ -94,6 +94,7 @@ def send_character_message(
         channel_type="private",
         receiver_game_character_id=target_character.id,
         content=payload.content,
+        phase=game.current_phase,
     )
     ai_message = Message(
         game_session_id=game_id,
@@ -101,6 +102,7 @@ def send_character_message(
         channel_type="private",
         receiver_game_character_id=human_character.id,
         content=reply.speech,
+        phase=game.current_phase,
     )
     persist_character_reply(
         db,

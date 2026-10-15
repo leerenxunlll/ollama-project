@@ -14,7 +14,6 @@ import {
   getGameFlow,
   getGames,
   getGameState,
-  getGameVoteResult,
   getMyCharacter,
   getMyStory,
   getPublicMessages,
@@ -26,7 +25,6 @@ import {
   sendAiChat,
   sendPublicTurn,
   startGame,
-  submitGameVote,
   type AiChatResponse,
   type AiStatusResponse,
   type CharacterContext,
@@ -46,11 +44,12 @@ import {
   type PublicTurnResponse,
   type ScriptSummary,
   type SelectableCharacter,
-  type VoteResult,
 } from './api'
 import WriterDraftDebug from './WriterDraftDebug'
 import RuntimeControlPanel from './RuntimeControlPanel'
 import EvidencePanel from './EvidencePanel'
+import VotingPanel from './VotingPanel'
+import EndingReplayPanel from './EndingReplayPanel'
 
 const GAME_PHASE_LABELS: Record<GamePhase, string> = {
   intro: '序章',
@@ -135,17 +134,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   const [gameFlowLoading, setGameFlowLoading] = useState(false)
   const [gameFlowUpdatedAt, setGameFlowUpdatedAt] = useState(0)
   const [flowClock, setFlowClock] = useState(Date.now())
-  const [voteResult, setVoteResult] = useState<VoteResult | null>(null)
-  const [voteError, setVoteError] = useState('')
-  const [voteLoading, setVoteLoading] = useState(false)
-  const [voteSubmitting, setVoteSubmitting] = useState(false)
-  const [voteMessage, setVoteMessage] = useState('')
-  const [voterGameCharacterId, setVoterGameCharacterId] = useState<
-    number | null
-  >(null)
-  const [targetGameCharacterId, setTargetGameCharacterId] = useState<
-    number | null
-  >(null)
   const [directorStatus, setDirectorStatus] =
     useState<DirectorStatusResponse | null>(null)
   const [directorStatusError, setDirectorStatusError] = useState('')
@@ -229,7 +217,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
   useEffect(() => {
     if (selectedGameId === null) {
       setGameFlow(null)
-      setVoteResult(null)
       return
     }
 
@@ -238,10 +225,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     setGameFlow(null)
     setGameFlowError('')
     setGameFlowLoading(true)
-    setVoteResult(null)
-    setVoteError('')
-    setVoteLoading(true)
-    setVoteMessage('')
     setDirectorRecommendation(null)
     setDirectorOutcome(null)
     setDirectorError('')
@@ -265,26 +248,7 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       }
     }
 
-    async function refreshVotes() {
-      try {
-        const loadedResult = await getGameVoteResult(gameId)
-        if (active) {
-          setVoteResult(loadedResult)
-          setVoteError('')
-        }
-      } catch (error) {
-        if (active) {
-          setVoteError(
-            error instanceof Error ? error.message : '读取投票统计失败',
-          )
-        }
-      } finally {
-        if (active) setVoteLoading(false)
-      }
-    }
-
     void refreshFlow()
-    void refreshVotes()
     const intervalId = window.setInterval(() => {
       void refreshFlow()
     }, 5000)
@@ -300,12 +264,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
     const intervalId = window.setInterval(() => setFlowClock(Date.now()), 1000)
     return () => window.clearInterval(intervalId)
   }, [selectedGameId])
-
-  useEffect(() => {
-    const characters = game?.id === selectedGameId ? game.game_characters : []
-    setVoterGameCharacterId(characters[0]?.id ?? null)
-    setTargetGameCharacterId(characters[1]?.id ?? characters[0]?.id ?? null)
-  }, [game?.id, selectedGameId])
 
   const inProgressGames = games.filter((item) => item.status === 'in_progress')
   const recentGames = games.slice(0, RECENT_GAME_SESSION_LIMIT)
@@ -351,19 +309,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
           Math.max(0, Math.floor((flowClock - gameFlowUpdatedAt) / 1000)),
       )
     : 0
-  const selectedVoterGameCharacterId = selectedGame?.game_characters.some(
-    (character) => character.id === voterGameCharacterId,
-  )
-    ? voterGameCharacterId
-    : (selectedGame?.game_characters[0]?.id ?? null)
-  const selectedTargetGameCharacterId = selectedGame?.game_characters.some(
-    (character) => character.id === targetGameCharacterId,
-  )
-    ? targetGameCharacterId
-    : (selectedGame?.game_characters[1]?.id ??
-      selectedGame?.game_characters[0]?.id ??
-      null)
-
   function formatDuration(totalSeconds: number): string {
     const minutes = Math.floor(totalSeconds / 60)
     const seconds = totalSeconds % 60
@@ -383,46 +328,6 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
       )
     } finally {
       setGameFlowLoading(false)
-    }
-  }
-
-  async function handleRefreshVoteTally() {
-    if (selectedGameId === null) return
-    setVoteLoading(true)
-    setVoteError('')
-    try {
-      setVoteResult(await getGameVoteResult(selectedGameId))
-    } catch (error) {
-      setVoteError(error instanceof Error ? error.message : '读取投票统计失败')
-    } finally {
-      setVoteLoading(false)
-    }
-  }
-
-  async function handleSubmitDebugVote() {
-    if (
-      selectedGameId === null ||
-      selectedVoterGameCharacterId === null ||
-      selectedTargetGameCharacterId === null
-    ) {
-      return
-    }
-
-    setVoteSubmitting(true)
-    setVoteError('')
-    setVoteMessage('')
-    try {
-      await submitGameVote(
-        selectedGameId,
-        selectedVoterGameCharacterId,
-        selectedTargetGameCharacterId,
-      )
-      setVoteMessage('测试投票已提交。')
-      await handleRefreshVoteTally()
-    } catch (error) {
-      setVoteError(error instanceof Error ? error.message : '提交投票失败')
-    } finally {
-      setVoteSubmitting(false)
     }
   }
 
@@ -1184,146 +1089,26 @@ function DevelopmentPage({ onBack }: DevelopmentPageProps) {
                 {new Date(currentGameFlow.phase_started_at).toLocaleString()}
               </p>
             )}
-
-            <div className="vote-debug-panel">
-              <div className="character-debug-heading">
-                <div>
-                  <p className="eyebrow">DEVELOPMENT VOTE DEBUG</p>
-                  <h3>投票提交流程</h3>
-                </div>
-                <button
-                  className="action-button"
-                  type="button"
-                  disabled={voteLoading}
-                  onClick={handleRefreshVoteTally}
-                >
-                  {voteLoading ? '刷新中…' : '刷新统计'}
-                </button>
-              </div>
-
-              <div className="vote-controls">
-                <div>
-                  <label className="field-label" htmlFor="debug-voter-select">
-                    投票人（本局任意角色）
-                  </label>
-                  <select
-                    className="dev-select"
-                    id="debug-voter-select"
-                    value={selectedVoterGameCharacterId ?? ''}
-                    onChange={(event) =>
-                      setVoterGameCharacterId(
-                        Number(event.target.value) || null,
-                      )
-                    }
-                  >
-                    {selectedGame.game_characters.map((character) => (
-                      <option key={character.id} value={character.id}>
-                        {character.character.name} · #{character.id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="debug-target-select">
-                    投票目标
-                  </label>
-                  <select
-                    className="dev-select"
-                    id="debug-target-select"
-                    value={selectedTargetGameCharacterId ?? ''}
-                    onChange={(event) =>
-                      setTargetGameCharacterId(
-                        Number(event.target.value) || null,
-                      )
-                    }
-                  >
-                    {selectedGame.game_characters.map((character) => (
-                      <option key={character.id} value={character.id}>
-                        {character.character.name} · #{character.id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  className="action-button"
-                  type="button"
-                  disabled={
-                    !currentGameFlow.can_vote ||
-                    selectedVoterGameCharacterId === null ||
-                    selectedTargetGameCharacterId === null ||
-                    voteSubmitting ||
-                    voteResult?.submitted_voter_game_character_ids.includes(
-                      selectedVoterGameCharacterId ?? -1,
-                    ) === true
-                  }
-                  onClick={handleSubmitDebugVote}
-                >
-                  {voteSubmitting ? '提交中…' : '提交测试投票'}
-                </button>
-              </div>
-
-              <div className="vote-progress-line">
-                <span>
-                  当前进度：
-                  {voteResult?.votes_cast ??
-                    currentGameFlow.vote_progress.votes_cast}{' '}
-                  /{' '}
-                  {voteResult?.total_voters ??
-                    currentGameFlow.vote_progress.total_voters}{' '}
-                  票
-                </span>
-                <strong>
-                  {(voteResult?.voting_complete ??
-                  currentGameFlow.vote_progress.voting_complete)
-                    ? '投票完成'
-                    : '投票进行中'}
-                </strong>
-              </div>
-              {voteMessage && (
-                <p className="dev-message" role="status">
-                  {voteMessage}
-                </p>
-              )}
-              {voteError && (
-                <p className="dev-message error-message" role="alert">
-                  {voteError}
-                </p>
-              )}
-              <div className="vote-tally-list" aria-label="按目标统计票数">
-                {selectedGame.game_characters.map((character) => (
-                  <div className="vote-tally-row" key={character.id}>
-                    <span>
-                      {character.character.name} · #{character.id}
-                    </span>
-                    <strong>
-                      {voteResult?.vote_count_by_target[character.id] ?? 0} 票
-                    </strong>
-                  </div>
-                ))}
-              </div>
-              {voteResult && voteResult.is_tie && (
-                <p className="debug-note">当前票数并列。</p>
-              )}
-              {voteResult?.winner_game_character_id !== null &&
-                voteResult?.winner_game_character_id !== undefined && (
-                  <p className="debug-note">
-                    当前最高票角色：
-                    {selectedGame.game_characters.find(
-                      (character) =>
-                        character.id === voteResult.winner_game_character_id,
-                    )?.character.name ??
-                      `角色 #${voteResult.winner_game_character_id}`}
-                  </p>
-                )}
-              {!currentGameFlow.can_vote && (
-                <p className="debug-note">
-                  当前阶段不允许投票；仍可查看投票进度与统计。
-                </p>
-              )}
-            </div>
           </>
         )}
       </section>
+
+      {selectedGame && currentGameFlow && (
+        <VotingPanel
+          gameId={selectedGame.id}
+          gameStatus={selectedGame.status}
+          currentPhase={currentGameFlow.current_phase}
+          canVote={currentGameFlow.can_vote}
+          characters={selectedGame.game_characters}
+        />
+      )}
+
+      {selectedGame && (
+        <EndingReplayPanel
+          gameId={selectedGame.id}
+          gameStatus={selectedGame.status}
+        />
+      )}
 
       {selectedGame && (
         <RuntimeControlPanel

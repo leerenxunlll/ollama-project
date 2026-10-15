@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.character_agent import CharacterAgent, get_character_agent
 from app.agents.director_agent import DirectorAgent, get_director_agent
+from app.agents.vote_agent import CharacterVoteAgent, get_character_vote_agent
 from app.core.config import settings
 from app.db.session import get_db
 from app.game.state_machine import GameRuleError
@@ -95,10 +96,13 @@ def tick_runtime(
     db: Session = Depends(get_db),
     director_agent: DirectorAgent = Depends(get_director_agent),
     character_agent: CharacterAgent = Depends(get_character_agent),
+    vote_agent: CharacterVoteAgent = Depends(get_character_vote_agent),
 ) -> RuntimeStepResult:
     _require_development()
     try:
-        return run_runtime_tick(db, game_id, director_agent, character_agent)
+        return run_runtime_tick(
+            db, game_id, director_agent, character_agent, vote_agent=vote_agent
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 

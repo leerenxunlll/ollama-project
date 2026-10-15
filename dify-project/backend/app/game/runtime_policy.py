@@ -18,6 +18,8 @@ class RuntimePolicy:
     runtime_tick_interval_seconds: int = 10
     action_lease_seconds: int = 240
     ai_investigations_per_character_per_phase: int = 1
+    ai_vote_max_attempts: int = 3
+    ai_vote_retry_seconds: int = 30
 
 
 RUNTIME_POLICY = RuntimePolicy()

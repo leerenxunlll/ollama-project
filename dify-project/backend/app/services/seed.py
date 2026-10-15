@@ -10,6 +10,7 @@ from app.models import (
     CharacterScriptChapter,
     Clue,
     Script,
+    ScriptCanonicalData,
     SharedScriptChapter,
 )
 
@@ -281,6 +282,7 @@ def seed_development_data(db: Session) -> Script:
                 clue.act = act
                 changed = True
         changed = _seed_story_chapters(db, existing, existing.characters) or changed
+        changed = _seed_canonical_data(db, existing) or changed
         if changed:
             db.commit()
         return existing
@@ -366,9 +368,96 @@ def seed_development_data(db: Session) -> Script:
     db.add(script)
     db.flush()
     _seed_story_chapters(db, script, script.characters)
+    _seed_canonical_data(db, script)
     db.commit()
     db.refresh(script)
     return script
+
+
+def _seed_canonical_data(db: Session, script: Script) -> bool:
+    """Add a fixed, idempotent canonical truth to the built-in dev script."""
+    if db.get(ScriptCanonicalData, script.id) is not None:
+        return False
+    role_ids = {
+        role_key: next(
+            character.id for character in script.characters if character.name == name
+        )
+        for role_key, name in (
+            ("role_1", "林澈"),
+            ("role_2", "许雁"),
+            ("role_3", "周序"),
+            ("role_4", "叶青"),
+        )
+    }
+    clue_ids = {
+        clue_key: next(clue.id for clue in script.clues if clue.name == name)
+        for clue_key, name in (
+            ("clue_1", "潮湿的登记页"),
+            ("clue_2", "断裂的铜扣"),
+            ("clue_3", "未署名信封"),
+        )
+    }
+    db.add(
+        ScriptCanonicalData(
+            script_id=script.id,
+            case_truth_json={
+                "culprit_role_key": "role_3",
+                "victim": "雾港旧仓库的管理员",
+                "motive": "阻止旧仓库的秘密牵连自己的家人。",
+                "method": "利用熟悉的侧门接近受害者，并在仓库内实施袭击。",
+                "crime_time": "暴雨夜，约 23:30。",
+                "crime_location": "雾港旧仓库。",
+                "case_summary": "周序为守住秘密，在暴雨夜于旧仓库杀害管理员。",
+                "key_causal_facts": [
+                    "周序熟悉旧仓库侧门及内部结构。",
+                    "案发当晚侧门没有上锁。",
+                    "周序试图避免旧仓库事件牵连家人。",
+                ],
+            },
+            timeline_json=[
+                {
+                    "event_key": "event_1",
+                    "time": "20:00",
+                    "location": "雾港旧仓库",
+                    "description": "管理员开始整理待封存的旧档案。",
+                    "involved_role_keys": ["role_1"],
+                    "is_public_knowledge": False,
+                },
+                {
+                    "event_key": "event_2",
+                    "time": "21:00",
+                    "location": "仓库侧门",
+                    "description": "周序确认侧门未上锁，并从熟悉的通道进入仓库。",
+                    "involved_role_keys": ["role_3"],
+                    "is_public_knowledge": False,
+                },
+                {
+                    "event_key": "event_3",
+                    "time": "23:30",
+                    "location": "雾港旧仓库",
+                    "description": "周序袭击管理员并造成其死亡。",
+                    "involved_role_keys": ["role_3"],
+                    "is_public_knowledge": False,
+                },
+                {
+                    "event_key": "event_4",
+                    "time": "次日清晨",
+                    "location": "雾港旧仓库",
+                    "description": "其他角色发现管理员死亡并开始调查。",
+                    "involved_role_keys": ["role_1", "role_2", "role_3", "role_4"],
+                    "is_public_knowledge": True,
+                },
+            ],
+            role_character_ids_json=role_ids,
+            clue_ids_json=clue_ids,
+            clue_event_keys_json={
+                "clue_1": ["event_1", "event_4"],
+                "clue_2": ["event_2", "event_3"],
+                "clue_3": ["event_4"],
+            },
+        )
+    )
+    return True
 
 
 def _seed_story_chapters(
